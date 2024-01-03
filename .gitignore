@@ -1,3 +1,5 @@
 **/__pychache__/**
-config.py
+api_config.py
 web_configurator/*.png
+*.pyc
+python_script/output.json

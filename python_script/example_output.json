@@ -1,0 +1,558 @@
+{
+    "_links": {
+        "collection": [
+            {
+                "href": "https://emakerspace.ch/wp-json/wc/v3/orders"
+            }
+        ],
+        "self": [
+            {
+                "href": "https://emakerspace.ch/wp-json/wc/v3/orders/373"
+            }
+        ]
+    },
+    "billing": {
+        "address_1": "",
+        "address_2": "",
+        "city": "",
+        "company": "",
+        "country": "CH",
+        "email": "",
+        "first_name": "2. Bestellung...",
+        "last_name": "",
+        "phone": "",
+        "postcode": "",
+        "state": ""
+    },
+    "cart_hash": "37ec587872b1248de326b9e295ab35a9",
+    "cart_tax": "0.00",
+    "coupon_lines": [
+    ],
+    "created_via": "checkout",
+    "currency": "CHF",
+    "currency_symbol": "CHF",
+    "customer_id": 0,
+    "customer_ip_address": "194.230.144.204",
+    "customer_note": "",
+    "customer_user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    "date_completed": "2024-01-03T13:33:25",
+    "date_completed_gmt": "2024-01-03T12:33:25",
+    "date_created": "2024-01-03T13:29:17",
+    "date_created_gmt": "2024-01-03T12:29:17",
+    "date_modified": "2024-01-03T13:33:25",
+    "date_modified_gmt": "2024-01-03T12:33:25",
+    "date_paid": "2024-01-03T13:33:25",
+    "date_paid_gmt": "2024-01-03T12:33:25",
+    "discount_tax": "0.00",
+    "discount_total": "0.00",
+    "fee_lines": [
+    ],
+    "id": 373,
+    "is_editable": false,
+    "line_items": [
+        {
+            "id": 11,
+            "image": {
+                "id": "360",
+                "src": "https://emakerspace.ch/wp-content/uploads/empty_glass.png"
+            },
+            "meta_data": [
+                {
+                    "display_key": "_configurator_data",
+                    "display_value": [
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 1,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 361,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/glass.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 1,
+                                "name": "EmptyGlass",
+                                "order": 1
+                            },
+                            "choice_id": 1,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 361,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/glass.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 1,
+                                "image": 361,
+                                "is_choice": "",
+                                "layer_id": 1,
+                                "name": "EmptyGlass"
+                            },
+                            "layer_id": 1,
+                            "product_id": 353,
+                            "variation_id": 0
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 2,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 357,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/cola.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 2,
+                                "name": "Coca Cola",
+                                "order": 2
+                            },
+                            "choice_id": 2,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 357,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/cola.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 2,
+                                "image": 357,
+                                "is_choice": "1",
+                                "layer_id": 2,
+                                "layer_name": "Filler",
+                                "name": "Coca Cola"
+                            },
+                            "layer_id": 2,
+                            "product_id": 353,
+                            "variation_id": 0
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 2,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 355,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/tequila.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 3,
+                                "name": "Tequila",
+                                "order": 2
+                            },
+                            "choice_id": 2,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 355,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/tequila.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 2,
+                                "image": 355,
+                                "is_choice": "1",
+                                "layer_id": 3,
+                                "layer_name": "Alk",
+                                "name": "Tequila"
+                            },
+                            "layer_id": 3,
+                            "product_id": 353,
+                            "variation_id": 0
+                        }
+                    ],
+                    "id": 124,
+                    "key": "_configurator_data",
+                    "value": [
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 1,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 361,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/glass.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 1,
+                                "name": "EmptyGlass",
+                                "order": 1
+                            },
+                            "choice_id": 1,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 361,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/glass.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 1,
+                                "image": 361,
+                                "is_choice": "",
+                                "layer_id": 1,
+                                "name": "EmptyGlass"
+                            },
+                            "layer_id": 1,
+                            "product_id": 353,
+                            "variation_id": 0
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 2,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 357,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/cola.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 2,
+                                "name": "Coca Cola",
+                                "order": 2
+                            },
+                            "choice_id": 2,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 357,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/cola.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 2,
+                                "image": 357,
+                                "is_choice": "1",
+                                "layer_id": 2,
+                                "layer_name": "Filler",
+                                "name": "Coca Cola"
+                            },
+                            "layer_id": 2,
+                            "product_id": 353,
+                            "variation_id": 0
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice": {
+                                "_id": 2,
+                                "active": false,
+                                "available": "1",
+                                "description": "",
+                                "images": [
+                                    {
+                                        "angle_name": "Main",
+                                        "angleId": 1,
+                                        "image": {
+                                            "dimensions": {
+                                                "height": 1080,
+                                                "width": 1080
+                                            },
+                                            "id": 355,
+                                            "url": "https://emakerspace.ch/wp-content/uploads/tequila.png"
+                                        },
+                                        "thumbnail": {
+                                            "id": 0,
+                                            "url": ""
+                                        }
+                                    }
+                                ],
+                                "layerId": 3,
+                                "name": "Tequila",
+                                "order": 2
+                            },
+                            "choice_id": 2,
+                            "images": {
+                                "angle_name": "Main",
+                                "angleId": 1,
+                                "image": {
+                                    "dimensions": {
+                                        "height": 1080,
+                                        "width": 1080
+                                    },
+                                    "id": 355,
+                                    "url": "https://emakerspace.ch/wp-content/uploads/tequila.png"
+                                },
+                                "thumbnail": {
+                                    "id": 0,
+                                    "url": ""
+                                }
+                            },
+                            "is_choice": true,
+                            "layer_data": {
+                                "angle_id": 1,
+                                "choice_id": 2,
+                                "image": 355,
+                                "is_choice": "1",
+                                "layer_id": 3,
+                                "layer_name": "Alk",
+                                "name": "Tequila"
+                            },
+                            "layer_id": 3,
+                            "product_id": 353,
+                            "variation_id": 0
+                        }
+                    ]
+                },
+                {
+                    "display_key": "_configurator_data_raw",
+                    "display_value": [
+                        {
+                            "angle_id": 1,
+                            "choice_id": 1,
+                            "image": 361,
+                            "is_choice": "",
+                            "layer_id": 1,
+                            "name": "EmptyGlass"
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice_id": 2,
+                            "image": 357,
+                            "is_choice": "1",
+                            "layer_id": 2,
+                            "layer_name": "Filler",
+                            "name": "Coca Cola"
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice_id": 2,
+                            "image": 355,
+                            "is_choice": "1",
+                            "layer_id": 3,
+                            "layer_name": "Alk",
+                            "name": "Tequila"
+                        }
+                    ],
+                    "id": 125,
+                    "key": "_configurator_data_raw",
+                    "value": [
+                        {
+                            "angle_id": 1,
+                            "choice_id": 1,
+                            "image": 361,
+                            "is_choice": "",
+                            "layer_id": 1,
+                            "name": "EmptyGlass"
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice_id": 2,
+                            "image": 357,
+                            "is_choice": "1",
+                            "layer_id": 2,
+                            "layer_name": "Filler",
+                            "name": "Coca Cola"
+                        },
+                        {
+                            "angle_id": 1,
+                            "choice_id": 2,
+                            "image": 355,
+                            "is_choice": "1",
+                            "layer_id": 3,
+                            "layer_name": "Alk",
+                            "name": "Tequila"
+                        }
+                    ]
+                },
+                {
+                    "display_key": "Configuration",
+                    "display_value": "Filler: Coca Cola Alk: Tequila",
+                    "id": 126,
+                    "key": "Configuration",
+                    "value": "<div class=\"order-configuration\"><div class=\"simple\"><strong>Filler</strong><span class=\"semicol\">:</span> <span class=\"mkl_pc-choice-name\">Coca Cola</span></div><div class=\"simple\"><strong>Alk</strong><span class=\"semicol\">:</span> <span class=\"mkl_pc-choice-name\">Tequila</span></div></div>"
+                }
+            ],
+            "name": "Mix yourself...",
+            "parent_name": null,
+            "price": 10,
+            "product_id": 353,
+            "quantity": 3,
+            "sku": "",
+            "subtotal": "30.00",
+            "subtotal_tax": "0.00",
+            "tax_class": "",
+            "taxes": [
+            ],
+            "total": "30.00",
+            "total_tax": "0.00",
+            "variation_id": 0
+        }
+    ],
+    "meta_data": [
+        {
+            "id": 32,
+            "key": "_billing_studiengang",
+            "value": ""
+        },
+        {
+            "id": 33,
+            "key": "is_vat_exempt",
+            "value": "no"
+        }
+    ],
+    "needs_payment": false,
+    "needs_processing": true,
+    "number": "373",
+    "order_key": "wc_order_DXlSlrzH9kbbq",
+    "parent_id": 0,
+    "payment_method": "cheque",
+    "payment_method_title": "Scheckzahlungen",
+    "payment_url": "https://emakerspace.ch/start-den-roboter/order-pay/373/?pay_for_order=true&key=wc_order_DXlSlrzH9kbbq",
+    "prices_include_tax": false,
+    "refunds": [
+    ],
+    "shipping": {
+        "address_1": "",
+        "address_2": "",
+        "city": "",
+        "company": "",
+        "country": "",
+        "first_name": "",
+        "last_name": "",
+        "phone": "",
+        "postcode": "",
+        "state": ""
+    },
+    "shipping_lines": [
+    ],
+    "shipping_tax": "0.00",
+    "shipping_total": "0.00",
+    "status": "completed",
+    "tax_lines": [
+    ],
+    "total": "30.00",
+    "total_tax": "0.00",
+    "transaction_id": "",
+    "version": "8.4.0"
+}
