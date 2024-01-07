@@ -9,7 +9,7 @@
 # consumer_secret = "CONSUMER_SECRET"
 
 from woocommerce import API
-import api_config as api_config
+import api_config
 from api_data import Order, Drink
 import re
 
@@ -30,44 +30,50 @@ def get_report():
 
 def get_orders(status_filter="processing"):
     orders = []
-    raw_response = wc_api.get("orders", params={"status": status_filter,
-                                                "order": "asc"})
-    response = raw_response.json()
+    response = wc_api.get("orders", params={"status": status_filter,
+                                            "order": "asc"}).json()
     # with open("output.json", "w") as f:
     #     f.write(str(response))
     for single_order in response:
         drinks = []
         order_id = single_order['id']
-        name = single_order["billing"]["first_name"]
-        products = single_order["line_items"]
-        total = single_order["total"]
-        status = single_order["status"]
-        for product in products:
-            drink_name = product["name"]
-            quantity = product["quantity"]
-            filler = ""
-            alk = ""
-            match drink_name:
-                case "Vodka-O":
-                    filler = "Orangensaft"
-                    alk = "Vodka"
-                case "Rum-Cola":
-                    filler = "Coca Cola"
-                    alk = "Rum"
-                case "DIY Drink":
-                    meta_data = product["meta_data"]
-                    config_value = meta_data[2]["display_value"]
-                    pattern = re.compile(r'Filler: (.*?) Alk: (.*?)$')
-                    match = pattern.search(config_value)
-                    filler, alk = match.groups()
+        try:
+            customer = single_order["billing"]["first_name"]
+            products = single_order["line_items"]
+            total = single_order["total"]
+            status = single_order["status"]
+            for product in products:
+                drink_name = product["name"]
+                quantity = product["quantity"]
+                filler = ""
+                alc = ""
+                match drink_name:
+                    case "Vodka-O":
+                        filler = "Orangensaft"
+                        alc = "Vodka"
+                    case "Rum-Cola":
+                        filler = "Coca-Cola"
+                        alc = "Rum"
+                    case "DIY Drink":
+                        meta_data = product["meta_data"]
+                        config_value = meta_data[2]["display_value"]
+                        pattern = re.compile(r'Filler: (.*?) Alkohol: (.*?)$')
+                        match = pattern.search(config_value)
+                        filler, alc = match.groups()
 
-            drinks.extend([Drink(drink_name, filler, alk)]*quantity)
+                drinks.extend([Drink(drink_name, filler, alc)]*quantity)
 
-        orders.append(Order(order_id,
-                            name,
-                            drinks,
-                            total,
-                            status))
+            orders.append(Order(order_id,
+                                customer,
+                                drinks,
+                                total,
+                                status))
+        except (IndexError, AttributeError) as e:
+            update_order_status(order_id, "failed")
+            error_msg = f"Order {order_id} failed due to {e}"
+            post_note(order_id, error_msg)
+            print(error_msg)
+
     return orders
 
 
