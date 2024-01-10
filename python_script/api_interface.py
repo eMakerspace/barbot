@@ -14,7 +14,7 @@ from api_data import Order, Drink
 import re
 
 wc_api = API(
-  url="https://emakerspace.ch/",
+  url="https://barbot.emakerspace.ch/",
   consumer_key=api_config.consumer_key,
   consumer_secret=api_config.consumer_secret,
   timeout=50

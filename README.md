@@ -2,7 +2,7 @@
 
 Design your own drinks...
 - Use a WordPress configurator to design a drink
-- Pay the drink with Twint
+- Pay the drink with Twint (WooCommerce Plugin)
 - Grab the data with a python script over the WooCommerce API
 - Control the robot and make the drinks
 
