@@ -1,5 +1,7 @@
 import time
-import api_interface
+from api import BarBotAPI
+
+bar_bot = BarBotAPI()
 
 
 def clear_line(n=1):
@@ -17,11 +19,11 @@ def get_sum(orders):
     return sum_per_status
 
 
-api_interface.get_report()
+bar_bot.report()
 
 try:
     while True:
-        orders = api_interface.get_orders(status_filter="any")
+        orders = bar_bot.orders(status_filter="any")
         sums = get_sum(orders)
         for key, value in sums.items():
             print(f"{key:<10}: {value:<5}")
