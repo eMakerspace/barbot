@@ -33,7 +33,7 @@ class Drink:
                     filler = "Orangensaft"
                     alcohol = "Vodka"
                 case "Rum-Cola":
-                    filler = "Coca-Cola"
+                    filler = "Cola"
                     alcohol = "Rum"
 
         return cls(name=name, filler=filler, alcohol=alcohol)

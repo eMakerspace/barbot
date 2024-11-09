@@ -3,3 +3,5 @@ api_config.py
 web_configurator/*.png
 *.pyc
 python_script/output.json
+storage.db
+*.log

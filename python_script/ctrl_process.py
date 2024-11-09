@@ -1,5 +1,6 @@
 from api import BarBotAPI
 from ctrl_robot import Robot
+import logging
 
 
 def print_orders(orders):
@@ -22,7 +23,7 @@ def process_order(order, bar_bot: BarBotAPI, robot: Robot):
         print(f"Order {order.id} failed, upload new status to WordPress")
         bar_bot.update_order_status(order, "failed")
 
-    print("Upload completed")
+    logging.info("Upload completed")
 
 
 if __name__ == "__main__":
