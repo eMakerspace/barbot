@@ -3,7 +3,7 @@
 enum State {
   IDLE,          // Waiting for new commands
   MOVING_TO_POS,    // Moving to a position (X)
-  SOUNDING,         // Sounding for a duration (Z)
+  PRESSING,         // Pressing for a duration (Z)
   HOMING,           // Homing (G28)
   STOPPED           // Stop command (M0)
 };
@@ -14,10 +14,10 @@ String currentCommand = "";  // The G-code string being processed
 String nextCommand = "";     // To accumulate subsequent commands
 String commandBuffer = "";
 unsigned long lastActionTime = 0;  // Time when the current action started
-unsigned long soundDuration = 0;   // Duration for the sound
+unsigned long pressDuration = 0;   // Duration for the press
 int targetPosition = 0;          // Target position (1 to 12)
 int currentPosition = 0;
-int speakerState = LOW;           // Speaker state (on/off)
+int pressRingState = LOW;           // Speaker state (on/off)
 bool combinedCommand = false;
 
 
@@ -30,9 +30,9 @@ void startP()
 
 void startZ()
 {
-  currentState = SOUNDING;
+  currentState = PRESSING;
   lastActionTime = millis();
-  Serial.println("Sound for: " + String(soundDuration) + " ms");
+  Serial.println("press for: " + String(pressDuration) + " ms");
 }
 
 void setIdle()
@@ -62,13 +62,13 @@ void handleG1(String command) {
     startP();
 
     if (zDuration != -1) {
-      soundDuration = zDuration;
+      pressDuration = zDuration;
       combinedCommand = true;
     } 
   }
 
   if (zDuration != -1 && xPos == -1) {
-    soundDuration = zDuration;
+    pressDuration = zDuration;
     startZ();
   }
 
@@ -91,13 +91,6 @@ void handleM0() {
   while(true);
 }
 
-void setup() {
-  Serial.begin(9600);
-  Serial.println("INIT");
-  pinMode(GPIO, OUTPUT);
-
-}
-
 int countCommands(String str) {
   int count = 0;
   for (int i = 0; i < str.length(); i++) {
@@ -106,6 +99,13 @@ int countCommands(String str) {
     }
   }
   return count;
+}
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("INIT");
+  pinMode(GPIO, OUTPUT);
+
 }
 
 void loop() {
@@ -161,15 +161,15 @@ void loop() {
       }
       break;
 
-    case SOUNDING:
-      // Turn on the speaker for the sound duration
-      if (millis() - lastActionTime >= soundDuration) {
-        Serial.println("Sound finished");
-        speakerState = LOW;
+    case PRESSING:
+      // Turn on the speaker for the press duration
+      if (millis() - lastActionTime >= pressDuration) {
+        Serial.println("press finished");
+        pressRingState = LOW;
         setIdle();
       } else {
-        if (speakerState == LOW) {
-          speakerState = HIGH;
+        if (pressRingState == LOW) {
+          pressRingState = HIGH;
         }
       }
       break;
@@ -185,7 +185,7 @@ void loop() {
     case STOPPED:
       // Handle the stop command: turn off speaker if it's on
       currentCommand = "";
-      speakerState = LOW;
+      pressRingState = LOW;
       break;
 
     default:
@@ -206,5 +206,5 @@ void loop() {
     }
   }
 
-  digitalWrite(GPIO, speakerState);
+  digitalWrite(GPIO, pressRingState);
 }
