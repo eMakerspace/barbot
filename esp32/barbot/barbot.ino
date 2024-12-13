@@ -12,16 +12,17 @@ int P[13]; // Array with 13 elements (P0 to P12)
 #define OUTPUT_STEP 5
 #define OUTPUT_DIR 18
 #define OUTPUT_SLEEP 26
-#define OUTPUT_RELAIS 2 //33  
+#define OUTPUT_RELAIS 33 //33  
 #define OUTPUT_ENABLERELAIS 32 //32
 
 #define INPUT_ENDSWITCH 4
 
 
 #define DOWN1_TIME 800
-#define DOWN2_TIME 400
-#define DOWN3_TIME 2000
-#define RELAISSWITCHING_TIME 50
+#define DOWN2_TIME 500
+#define DOWN3_TIME 1100
+#define RELAISSWITCHING_TIME1 500
+#define RELAISSWITCHING_TIME2 250
 #define DEBOUNCE_TIME 20
 
 #define SPEED_DEFAULT 6000
@@ -61,7 +62,6 @@ int old_endswitchState = HIGH;
 void startP()
 {
   currentState = MOVING_TO_POS;
-  Serial.println("Moving to position: " + String(targetPositionIndex));
   stepper.moveTo(P[targetPositionIndex]);
 }
 
@@ -69,7 +69,6 @@ void startZ()
 {
   currentState = PRESSING;
   lastActionTime = millis();
-  Serial.println("press for: " + String(pressDuration) + " ms");
 }
 
 void setIdle()
@@ -134,13 +133,12 @@ void handleG1(String command) {
 void handleG28() {
   currentState = HOMING;
   stepper.setSpeed(SPEED_HOMING);
-  Serial.println("Homing...");
 }
 
 // Function to handle M0 command (stop)
 void handleM0() {
   currentState = STOPPED;
-  Serial.println("Stop command received.");
+  Serial.println("STOP");
   while(true);
 }
 
@@ -150,14 +148,21 @@ void checkSerial()
     char incomingChar = Serial.read();
     
     if (incomingChar == '\n') {
-      if (commandBuffer != "M0")
+      if (commandBuffer == "M0")
       {
-        commandQueue += commandBuffer + incomingChar;
+        handleM0();
+      }
+      else if (commandBuffer == "STATUS")
+      {
+        if(currentCommand == "") Serial.println("idle");
+        else Serial.println("busy");
         commandBuffer = "";
       }
       else
       {
-        handleM0();
+        commandQueue += commandBuffer + incomingChar;
+        commandBuffer = "";
+        Serial.println("ACK");
       }
       
     } else {
@@ -222,14 +227,17 @@ void loop() {
       // Idle state, waiting for new commands
       if (currentCommand.startsWith("G1")) {
         handleG1(currentCommand);
-      } else if (currentCommand.startsWith("G28")) {
+      } else if (currentCommand == "G28") {
         handleG28();
+      }
+      else if (currentCommand != "")
+      {
+        invalidCommand();
       }
       break;
 
     case MOVING_TO_POS:
       if (stepper.distanceToGo() == 0) {
-        Serial.println("Position set to: " + String(targetPositionIndex));
         currentPositionIndex = targetPositionIndex;
         if (combinedCommand)
         {
@@ -246,25 +254,35 @@ void loop() {
     case DOWN1:
       pressRingState = false; // Runter
       enableRelais = true;
-      if (millis() - lastActionTime - RELAISSWITCHING_TIME >= DOWN1_TIME) {
+
+      if (millis() - lastActionTime >= DOWN1_TIME) {
         enableRelais = false;
       }
-      if (millis() - lastActionTime >= DOWN1_TIME) {
+      if (millis() - lastActionTime >= DOWN1_TIME + (RELAISSWITCHING_TIME1) / 2) {
+        pressRingState = true;
+      }
+      if (millis() - lastActionTime >= DOWN1_TIME + RELAISSWITCHING_TIME1) {
         lastActionTime = millis();
         currentState = DOWN2;
       }
+      
       break;
 
     case DOWN2:
-      enableRelais = true; // Hoch
-      pressRingState = true;
-      if (millis() - lastActionTime - RELAISSWITCHING_TIME >= DOWN2_TIME) {
-        enableRelais = false;
-       }
+      pressRingState = true; // Hoch
+      enableRelais = true;
+
       if (millis() - lastActionTime >= DOWN2_TIME) {
-          lastActionTime = millis();
-          currentState = DOWN3;
-       }
+        enableRelais = false;
+      }
+      if (millis() - lastActionTime >= DOWN2_TIME + (RELAISSWITCHING_TIME2) / 2) {
+        pressRingState = false;
+      }
+      if (millis() - lastActionTime >= DOWN2_TIME + RELAISSWITCHING_TIME2) {
+        lastActionTime = millis();
+        currentState = DOWN3;
+      }
+
       break;
 
     case DOWN3:
@@ -276,12 +294,10 @@ void loop() {
       }
       break;
 
-
     case PRESSING:
       pressRingState = true; // HOCH
       enableRelais = true;
       if (millis() - lastActionTime >= pressDuration) {
-        Serial.println("press finished");
         currentState = DOWN1;
         lastActionTime = millis();
       }
@@ -289,11 +305,10 @@ void loop() {
 
     case HOMING:
       stepper.runSpeed();
-      if ((millis() - lastDebounceTime) > debounceDelay) {
+      if ((millis() - lastDebounceTime) > DEBOUNCE_TIME) {
         // If the switch is pressed (LOW state), stop the motor
-        if (endswitchState == LOW) {
+        if (endswitchState == HIGH) {
           stepper.stop();
-          Serial.println("Homed successfully.");
           currentCommand = "";
           currentPositionIndex = 0;
           stepper.setCurrentPosition(0);
