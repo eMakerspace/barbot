@@ -4,19 +4,26 @@ from storage import Storage, NoIngredients
 from math import copysign
 import sqlite3
 import logging
+import serial
 
 
 class Robot:
     def __init__(self):
         self.storage = Storage()
         self.position = 0
+        self._ser = serial.Serial("COM29", timeout=1)
 
-    def fill_blocking(self, target):
-        while self.position != target:
-            self.position = self.position + copysign(1, target - self.position)
-            time.sleep(0.5)
-            print(f"Drive to {self.position}")
-        print(f"Arrived at {target}")
+    def fill_non_blocking(self, target, amount):
+        self._ser.write((f"G1 X{target} Z{amount}\n").encode('utf-8'))
+
+    def move_non_blocking(self, target):
+        self._ser.write((f"G1 X{target}\n").encode('utf-8'))
+
+    def wait_for_idle(self):
+        self._ser.write(("STATUS").encode('utf-8'))
+        response = ""
+        while response != "idle":
+            response = self._ser.read_until(expected=b"idle")
 
     def make_drink(self, drink: Drink):
         try:
@@ -30,15 +37,11 @@ class Robot:
             return False
 
         print("Robot: Waiting for a new cup")
-        time.sleep(0.5)
         print("Robot: Start movement")
-        time.sleep(0.2)
         print(f"Robot: Pouring filler: {drink.filler}")
-        self.fill_blocking(pos_filler)
-        time.sleep(1)
+        self.fill_non_blocking(pos_filler, 3000)
         print(f"Robot: Pouring alcohol: {drink.alcohol}")
-        self.fill_blocking(pos_alcohol)
-        time.sleep(1)
-        self.fill_blocking(0)
+        self.fill_non_blocking(pos_alcohol, 2000)
+        self.wait_for_idle()
         print(f"Robot: Completed {drink.name}")
         return True
