@@ -42,6 +42,6 @@ class Robot:
         self.fill_non_blocking(pos_filler, 3000)
         print(f"Robot: Pouring alcohol: {drink.alcohol}")
         self.fill_non_blocking(pos_alcohol, 2000)
-        self.wait_for_idle()
+        # self.wait_for_idle()
         print(f"Robot: Completed {drink.name}")
         return True
