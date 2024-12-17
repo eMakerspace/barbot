@@ -4,6 +4,10 @@
 cli_polling.py
 
 ## Prerequisite
+```
+pip install woocommerce
+pip install pyserial
+```
 Add file api_config.py with
 ```
 consumer_key = "ck_abcdefghijklmnopqrstuvwxyz"
