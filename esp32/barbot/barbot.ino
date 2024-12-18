@@ -20,7 +20,7 @@ int P[13]; // Array with 13 elements (P0 to P12)
 
 #define DOWN1_TIME 800
 #define DOWN2_TIME 500
-#define DOWN3_TIME 1100
+#define DOWN3_TIME 2000
 #define RELAISSWITCHING_TIME1 500
 #define RELAISSWITCHING_TIME2 250
 #define DEBOUNCE_TIME 20
@@ -54,6 +54,7 @@ int currentPositionIndex = 0;
 bool pressRingState = false; 
 bool enableRelais = false;
 bool combinedCommand = false;
+bool homing = false;
 
 int endswitchState = HIGH;
 int old_endswitchState = HIGH;
@@ -131,8 +132,9 @@ void handleG1(String command) {
 
 // Function to handle G28 command (home)
 void handleG28() {
-  currentState = HOMING;
-  stepper.setSpeed(SPEED_HOMING);
+  homing = true;
+  currentState = DOWN3;
+  lastActionTime = millis();
 }
 
 // Function to handle M0 command (stop)
@@ -290,7 +292,16 @@ void loop() {
       enableRelais = true;
       if (millis() - lastActionTime >= DOWN3_TIME) {
         enableRelais = false;
-        setIdle();
+
+        if(homing)
+        {
+          stepper.setSpeed(SPEED_HOMING);
+          currentState = HOMING;
+        }
+        else
+        {
+          setIdle();
+        }
       }
       break;
 
@@ -311,6 +322,7 @@ void loop() {
           stepper.stop();
           currentCommand = "";
           currentPositionIndex = 0;
+          homing = false;
           stepper.setCurrentPosition(0);
           stepper.setSpeed(SPEED_DEFAULT);
           currentState = IDLE;  // Transition back to waiting after homing
