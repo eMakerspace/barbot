@@ -136,7 +136,7 @@
         "min_hole_to_hole": 0.25,
         "min_microvia_diameter": 0.2,
         "min_microvia_drill": 0.1,
-        "min_resolved_spokes": 2,
+        "min_resolved_spokes": 1,
         "min_silk_clearance": 0.0,
         "min_text_height": 0.8,
         "min_text_thickness": 0.08,
@@ -192,7 +192,9 @@
         }
       ],
       "track_widths": [
-        0.0
+        0.0,
+        0.2,
+        0.5
       ],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
@@ -224,6 +226,10 @@
         {
           "diameter": 0.0,
           "drill": 0.0
+        },
+        {
+          "diameter": 0.45,
+          "drill": 0.25
         }
       ],
       "zones_allow_external_fillets": false,
@@ -655,6 +661,26 @@
     [
       "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55",
       "Root"
+    ],
+    [
+      "8780f0cb-0f99-4c9d-9591-663d2ed68add",
+      "Pump Motor0"
+    ],
+    [
+      "ff104235-8e02-4333-bfc8-128251b274f5",
+      "Pump Motor1"
+    ],
+    [
+      "a45711a3-bc1b-4f0b-a56f-95e639e98ec5",
+      "Pump Motor2"
+    ],
+    [
+      "1e430621-e5a9-4cad-9fd8-f89498c3c25c",
+      "Pump Motor3"
+    ],
+    [
+      "55b1bb28-fac0-460b-9039-a8640d27a640",
+      "Pump Motor4"
     ]
   ],
   "text_variables": {}

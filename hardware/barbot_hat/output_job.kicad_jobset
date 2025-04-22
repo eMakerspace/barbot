@@ -224,7 +224,7 @@
         "rotation_y": 0.0,
         "rotation_z": 0.0,
         "side": "top",
-        "width": 1240,
+        "width": 1600,
         "zoom": 1.0
       },
       "type": "pcb_render"
@@ -272,7 +272,7 @@
         "rotation_y": 0.0,
         "rotation_z": 0.0,
         "side": "bottom",
-        "width": 1240,
+        "width": 1600,
         "zoom": 1.0
       },
       "type": "pcb_render"
@@ -314,14 +314,14 @@
         "perspective": true,
         "pivot_x": 0.0,
         "pivot_y": 0.0,
-        "pivot_z": -3.0,
+        "pivot_z": -1.0,
         "quality": "basic",
         "rotation_x": -50.0,
         "rotation_y": 0.0,
         "rotation_z": -30.0,
         "side": "top",
         "width": 2560,
-        "zoom": 1.0
+        "zoom": 0.9
       },
       "type": "pcb_render"
     },
@@ -362,14 +362,14 @@
         "perspective": true,
         "pivot_x": 0.0,
         "pivot_y": 0.0,
-        "pivot_z": 3.0,
+        "pivot_z": 1.0,
         "quality": "basic",
         "rotation_x": -50.0,
         "rotation_y": 0.0,
         "rotation_z": 30.0,
         "side": "bottom",
         "width": 2560,
-        "zoom": 1.0
+        "zoom": 0.9
       },
       "type": "pcb_render"
     },
