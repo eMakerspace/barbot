@@ -11432,7 +11432,7 @@
 			(justify left bottom)
 		)
 	)
-	(gr_text "BARBOT - EMAKERSPACE"
+	(gr_text "BARBOT.EMAKERSPACE.CH"
 		(at 132 80.5 0)
 		(layer "F.SilkS" knockout)
 		(uuid "e00e4e51-8cc5-49e0-91d9-2c445f1c80d0")
