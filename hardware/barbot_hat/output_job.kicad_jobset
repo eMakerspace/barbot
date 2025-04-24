@@ -147,7 +147,7 @@
         "mirror": false,
         "negative": false,
         "output_filename": "",
-        "plot_drawing_sheet": true,
+        "plot_drawing_sheet": false,
         "plot_footprint_values": true,
         "plot_pad_numbers": false,
         "plot_ref_des": true,

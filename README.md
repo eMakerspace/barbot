@@ -4,9 +4,14 @@ Design your own drinks...
 - Use a WordPress configurator to design a drink
 - Pay the drink with Twint
 - Grab the data with a python script over the WooCommerce API
-- Control the robot and make the drinks
+- Control the robot via the RPi HAT and make the drinks
 
+## Web UI
 ![Configurator](doc/online_config.png)
+
+## RPi HAT
+
+![HAT](hardware/img/board_3d_top.png)
 
 ## Processing an order
 ```

@@ -10962,8 +10962,8 @@
 		)
 	)
 	(gr_rect
-		(start 144.253673 72.514122)
-		(end 135.642678 74.645063)
+		(start 135.642678 72.514122)
+		(end 144.253673 74.645063)
 		(stroke
 			(width 0)
 			(type solid)
@@ -10983,8 +10983,8 @@
 		(uuid "c70e7db0-0f2e-485e-873c-5bdff977edcf")
 	)
 	(gr_rect
-		(start 159.948176 65.395063)
-		(end 134.948176 80.145063)
+		(start 134.948176 65.395063)
+		(end 159.948176 80.145063)
 		(stroke
 			(width 0.3)
 			(type solid)
@@ -10994,8 +10994,8 @@
 		(uuid "dac5bc25-a247-4368-9195-a6d8b3990740")
 	)
 	(gr_rect
-		(start 151.753673 77.514122)
-		(end 135.642678 79.645063)
+		(start 135.642678 77.514122)
+		(end 151.753673 79.645063)
 		(stroke
 			(width 0)
 			(type solid)
@@ -11537,19 +11537,6 @@
 		(at 159.642678 74.528144 -0)
 		(layer "B.SilkS")
 		(uuid "4900fce6-ba0d-44c3-9494-8c69fe9985ba")
-		(effects
-			(font
-				(size 1.5 1.5)
-				(thickness 0.3)
-				(bold yes)
-			)
-			(justify left bottom mirror)
-		)
-	)
-	(gr_text "e734c4f"
-		(at 132.5 80.5 270)
-		(layer "B.SilkS")
-		(uuid "7478b65e-2ee9-49e0-8b78-5b6ee82e58e2")
 		(effects
 			(font
 				(size 1.5 1.5)
