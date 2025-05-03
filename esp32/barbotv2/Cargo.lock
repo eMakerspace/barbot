@@ -9,6 +9,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
+name = "arrayvec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -30,6 +36,7 @@ dependencies = [
  "esp-hal-embassy",
  "esp-println",
  "esp-wifi",
+ "gcode",
  "heapless",
  "log",
  "smoltcp",
@@ -88,6 +95,12 @@ name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
+name = "cfg-if"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 
 [[package]]
 name = "cfg-if"
@@ -240,7 +253,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d2c8cdff05a7a51ba0087489ea44b0b1d97a296ca6b1d6d1a33ea7423d34049"
 dependencies = [
- "cfg-if",
+ "cfg-if 1.0.0",
  "critical-section",
  "embedded-io-async",
  "futures-sink",
@@ -254,7 +267,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f820157f198ada183ad62e0a66f554c610cdcd1a9f27d4b316358103ced7a1f8"
 dependencies = [
- "cfg-if",
+ "cfg-if 1.0.0",
  "critical-section",
  "document-features",
  "embassy-time-driver",
@@ -412,7 +425,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a78132d362cbf62ce22a1466eb9e98424f6b2d1e476e7a3cb46ca9063c5833f7"
 dependencies = [
- "cfg-if",
+ "cfg-if 1.0.0",
  "critical-section",
  "document-features",
  "enumset",
@@ -459,7 +472,7 @@ dependencies = [
  "bitfield",
  "bitflags 2.9.0",
  "bytemuck",
- "cfg-if",
+ "cfg-if 1.0.0",
  "chrono",
  "critical-section",
  "delegate",
@@ -573,7 +586,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd7d7ea0e2c374343a375758861e13cf618db619436bcb386dfe5529ef31e9d5"
 dependencies = [
- "cfg-if",
+ "cfg-if 1.0.0",
  "critical-section",
  "document-features",
  "embassy-net-driver",
@@ -667,6 +680,17 @@ name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
+
+[[package]]
+name = "gcode"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5125264a3fbfa54f30f79428f4e69d74ad279f554ba90829189517f407f41dbc"
+dependencies = [
+ "arrayvec",
+ "cfg-if 0.1.10",
+ "libm",
+]
 
 [[package]]
 name = "hash32"
@@ -1008,7 +1032,7 @@ checksum = "dad095989c1533c1c266d9b1e8d70a1329dd3723c3edac6d03bbd67e7bf6f4bb"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",
- "cfg-if",
+ "cfg-if 1.0.0",
  "heapless",
  "managed",
 ]

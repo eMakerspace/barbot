@@ -6,13 +6,29 @@ use embassy_time::{Duration, Timer};
 use embedded_io_async::Read;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::AnyPin;
+use esp_hal::interrupt::{InterruptHandler, Priority};
+use esp_hal::peripheral::Peripheral;
+use esp_hal::peripherals::RMT;
+use esp_hal::rmt::{Rmt, TxChannelCreator};
+use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx};
 use log::info;
 
+pub mod stepper;
+
 extern crate alloc;
 
 async fn handle_cmd(cmd: &str) {
+    let gcmd = match gcode::parse(cmd).next() {
+        Some(cmd) => cmd,
+        None => {
+            log::warn!("received cmd '{cmd}' is not valid gcode");
+            return;
+        }
+    };
+
     // TODO: do something with command
 }
 
@@ -32,7 +48,7 @@ async fn serial_reader(mut rx: UsbSerialJtagRx<'static, esp_hal::Async>) {
             Ok(val) => val,
         };
 
-        if let Some((idx, _)) = buf[total_read..total_read+count_read]
+        if let Some((idx, _)) = buf[total_read..total_read + count_read]
             .iter()
             .enumerate()
             .find(|(_i, &c)| c == b'\r' || c == b'\n')
@@ -47,7 +63,6 @@ async fn serial_reader(mut rx: UsbSerialJtagRx<'static, esp_hal::Async>) {
             };
 
             if !ignore_next_command {
-                log::info!("cmd: {s}");
                 handle_cmd(s.trim()).await;
             }
             ignore_next_command = false;
@@ -96,4 +111,49 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(serial_reader(usb_rx))
         .expect("serial reader task");
+
+    info!("Barbot HAT v{} running", env!("CARGO_PKG_VERSION"));
+}
+
+struct IterRmt<C: esp_hal::rmt::TxChannelInternal> {
+    rmt: C,
+}
+
+impl<C: esp_hal::rmt::TxChannelInternal> IterRmt<C> {
+    pub fn new(rmt_periph: impl Peripheral<P = RMT>, gpio: AnyPin) {
+        use esp_hal::interrupt::InterruptConfigurable;
+        use esp_hal::rmt::{Channel, Event, TxChannelInternal};
+        use esp_hal::Blocking;
+
+        let mut rmt = Rmt::new(rmt_periph, Rate::from_mhz(80)).unwrap();
+        let tx_cfg = esp_hal::rmt::TxChannelConfig::default()
+            .with_idle_output(true)
+            .with_idle_output_level(esp_hal::gpio::Level::Low)
+            .with_clk_divider(160); // 2 microsecond pulse
+
+        extern "C" fn interrupt_handler() {
+            let st = RMT::regs().int_st().read();
+
+            if st.ch0_tx_end().bit() || st.ch0_tx_err().bit() {
+                Channel::<Blocking, 0>::clear_interrupts();
+                // TODO(Dominik): finish
+            }
+        }
+
+        rmt.set_interrupt_handler(InterruptHandler::new(interrupt_handler, Priority::None));
+        let rmt = rmt.channel0.configure(gpio, tx_cfg).unwrap();
+
+        Channel::<Blocking, 0>::enable_listen_interrupt(
+            Event::Error | Event::Threshold | Event::End,
+            true,
+        );
+
+        unsafe {
+            esp_hal::peripherals::RMT::regs()
+                .ch0_tx_conf0()
+                .modify(|_, w| w.mem_size().bits(2));
+        }
+        
+        // TODO(Dominik): finish
+    }
 }
