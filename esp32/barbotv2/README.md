@@ -35,8 +35,8 @@ and should determine the right chip if it is connected with USB.
 
 ## Roadmap
 
-- [X] Project setup, receving commands, wokwi
-- [ ] Control stepper motor
+- [X] Project setup, receiving commands, wokwi
+- [X] Control stepper motor
 - [ ] Control pumps
 - [ ] Stepper motor homing (with end-switch on `GPIO10`)
 - [ ] G-code parsing, commands

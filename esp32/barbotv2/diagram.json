@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "author": "Uri Shaked",
+    "author": "emakerspace",
     "editor": "wokwi",
     "parts": [
         {
@@ -9,7 +9,7 @@
             "top": 38.97,
             "left": 13.78,
             "attrs": {
-                "serialInterface": "USB_SERIAL_JTAG" 
+                "serialInterface": "USB_SERIAL_JTAG"
             }
         },
         {
@@ -59,19 +59,19 @@
         {
             "type": "wokwi-gnd",
             "id": "gnd3",
-            "top": 96,
+            "top": 144,
             "left": -317.4,
             "attrs": {}
         },
         {
             "type": "wokwi-stepper-motor",
             "id": "stepper1",
-            "top": 201.39,
-            "left": -241.23,
-            "rotate": 180,
+            "top": -230.61,
+            "left": -250.83,
             "attrs": {
                 "size": "17",
-                "display": "steps"
+                "display": "steps",
+                "arrow": "red"
             }
         },
         {
@@ -220,38 +220,6 @@
             ]
         ],
         [
-            "drv1:1A",
-            "stepper1:A+",
-            "green",
-            [
-                "h0"
-            ]
-        ],
-        [
-            "drv1:2A",
-            "stepper1:A-",
-            "green",
-            [
-                "h0"
-            ]
-        ],
-        [
-            "drv1:2B",
-            "stepper1:B-",
-            "green",
-            [
-                "h0"
-            ]
-        ],
-        [
-            "stepper1:B+",
-            "drv1:1B",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
             "esp:D1",
             "led2:A",
             "green",
@@ -349,9 +317,9 @@
             "gnd3:GND",
             "black",
             [
-                "h9.75",
-                "v-38.32",
-                "h-124.8"
+                "h57.75",
+                "v67.28",
+                "h-172.8"
             ]
         ],
         [
@@ -371,12 +339,44 @@
             [
                 "v201.6"
             ]
+        ],
+        [
+            "drv1:1A",
+            "stepper1:A+",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "drv1:1B",
+            "stepper1:A-",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "drv1:2B",
+            "stepper1:B-",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "drv1:2A",
+            "stepper1:B+",
+            "green",
+            [
+                "h0"
+            ]
         ]
     ],
-    "dependencies": {},
     "serialMonitor": {
         "display": "terminal",
-        "convertEol": true,
-        "newline": "cr"
-    }
+        "newline": "cr",
+        "convertEol": true
+    },
+    "dependencies": {}
 }

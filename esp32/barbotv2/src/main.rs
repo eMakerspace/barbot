@@ -6,16 +6,14 @@ use embassy_time::{Duration, Timer};
 use embedded_io_async::Read;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::AnyPin;
-use esp_hal::interrupt::{InterruptHandler, Priority};
-use esp_hal::peripheral::Peripheral;
-use esp_hal::peripherals::RMT;
-use esp_hal::rmt::{Rmt, TxChannelCreator};
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx};
+use esp_println::println;
 use log::info;
+use stepper::Stepper;
 
+pub mod rmt;
 pub mod stepper;
 
 extern crate alloc;
@@ -113,47 +111,23 @@ async fn main(spawner: Spawner) {
         .expect("serial reader task");
 
     info!("Barbot HAT v{} running", env!("CARGO_PKG_VERSION"));
-}
 
-struct IterRmt<C: esp_hal::rmt::TxChannelInternal> {
-    rmt: C,
-}
+    let tx_cfg = esp_hal::rmt::TxChannelConfig::default()
+        .with_idle_output(true)
+        .with_idle_output_level(esp_hal::gpio::Level::Low)
+        .with_clk_divider(160); // 4 microsecond tick (40 MHz / 160)
+    let rmt = rmt::IterRmt::new(peripherals.RMT, Rate::from_mhz(40), peripherals.GPIO20, tx_cfg);
+    let mut stepper = Stepper::new(rmt, Rate::from_hz(40_000_000 / 160), peripherals.GPIO21, false);
 
-impl<C: esp_hal::rmt::TxChannelInternal> IterRmt<C> {
-    pub fn new(rmt_periph: impl Peripheral<P = RMT>, gpio: AnyPin) {
-        use esp_hal::interrupt::InterruptConfigurable;
-        use esp_hal::rmt::{Channel, Event, TxChannelInternal};
-        use esp_hal::Blocking;
+    // Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
+    stepper.set_acceleration(300.0 * 8.0); // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    stepper.set_max_speed(200.0 * 8.0); // 2.0 turns / seccond (in simulation, 200 steps / turn)
 
-        let mut rmt = Rmt::new(rmt_periph, Rate::from_mhz(80)).unwrap();
-        let tx_cfg = esp_hal::rmt::TxChannelConfig::default()
-            .with_idle_output(true)
-            .with_idle_output_level(esp_hal::gpio::Level::Low)
-            .with_clk_divider(160); // 2 microsecond pulse
-
-        extern "C" fn interrupt_handler() {
-            let st = RMT::regs().int_st().read();
-
-            if st.ch0_tx_end().bit() || st.ch0_tx_err().bit() {
-                Channel::<Blocking, 0>::clear_interrupts();
-                // TODO(Dominik): finish
-            }
-        }
-
-        rmt.set_interrupt_handler(InterruptHandler::new(interrupt_handler, Priority::None));
-        let rmt = rmt.channel0.configure(gpio, tx_cfg).unwrap();
-
-        Channel::<Blocking, 0>::enable_listen_interrupt(
-            Event::Error | Event::Threshold | Event::End,
-            true,
-        );
-
-        unsafe {
-            esp_hal::peripherals::RMT::regs()
-                .ch0_tx_conf0()
-                .modify(|_, w| w.mem_size().bits(2));
-        }
-        
-        // TODO(Dominik): finish
+    loop {
+        println!("run");
+        stepper.run_to_pos(500 * 8).await.unwrap();
+        Timer::after(Duration::from_millis(500)).await;
+        stepper.run_to_pos(-500 * 8).await.unwrap();
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
