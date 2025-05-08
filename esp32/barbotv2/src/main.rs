@@ -121,7 +121,7 @@ async fn main(spawner: Spawner) {
 
     // Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
     stepper.set_acceleration(300.0 * 8.0); // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    stepper.set_max_speed(200.0 * 8.0); // 2.0 turns / seccond (in simulation, 200 steps / turn)
+    stepper.set_max_speed(200.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
 
     loop {
         println!("run");
