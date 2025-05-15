@@ -39,4 +39,10 @@ and should determine the right chip if it is connected with USB.
 - [X] Control stepper motor
 - [ ] Control pumps
 - [ ] Stepper motor homing (with end-switch on `GPIO10`)
-- [ ] G-code parsing, commands
+    - [X] Reacting to end-switch (stops the stepper motor immediately).
+- [X] G-code parsing, commands
+    - [X] `G0 X{position}` for moving the stepper motor to step `{position}`.
+    - [ ] `G28` to start homing.
+    - [X] `M0` to stop the stepper motor slowly.
+    - [X] `M0.1` to stop the stepper motor immediately (without deccelerating).
+    - [X] `M10` to toggle serial echo.
