@@ -1,15 +1,9 @@
-use core::pin::pin;
-
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::Timer;
 use esp_hal::gpio::{Level, Output, OutputConfig, OutputPin};
 use esp_hal::peripheral::Peripheral;
 use esp_hal::rmt::PulseCode;
 use esp_hal::time::Rate;
-use esp_println::{dbg, println};
-use futures::future::{Either, OptionFuture};
-use futures::FutureExt;
 use num_traits::float::FloatCore;
 
 use crate::rmt::IterRmt;

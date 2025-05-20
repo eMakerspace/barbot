@@ -13,8 +13,7 @@ use esp_hal::peripherals::RMT;
 use esp_hal::rmt::{Channel, Event, Rmt, TxChannelConfig, TxChannelCreator, TxChannelInternal};
 use esp_hal::time::Rate;
 use esp_hal::{handler, Blocking};
-use esp_println::{dbg, println};
-use portable_atomic::{AtomicPtr, AtomicU32, Ordering};
+use portable_atomic::{AtomicPtr, Ordering};
 use portable_atomic_util::{Arc, Weak};
 
 type RmtChan = Channel<Blocking, 0>;
@@ -72,7 +71,7 @@ impl RmtData {
     fn stop() {
         critical_section::with(|_| {
             // RmtChan::stop();
-            
+
             // Somehow stopping the transmission by setting the STOP flag
             // doesn't work (maybe a simulator problem?). Instead we fill
             // the beginning with zeros and start again, causing the transmission

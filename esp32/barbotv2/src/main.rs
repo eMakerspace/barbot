@@ -4,10 +4,9 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
-use embassy_sync::channel::{Channel, Sender};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
 use embedded_io_async::Read;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
@@ -15,8 +14,7 @@ use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx};
-use esp_println::{print, println};
-use esp_wifi::wifi::event::HomeChannelChange;
+use esp_println::print;
 use futures::{select_biased, FutureExt};
 use log::info;
 use num_traits::float::FloatCore;
@@ -211,7 +209,7 @@ async fn stepper_task(
             stepper_chan,
         ));
 
-    async fn home_stepper(stepper: &mut Stepper, end_stop: &mut Input<'static>) -> bool {
+    async fn home_stepper(_stepper: &mut Stepper, _end_stop: &mut Input<'static>) -> bool {
         // TODO
         false
     }
