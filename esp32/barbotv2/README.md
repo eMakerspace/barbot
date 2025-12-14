@@ -8,6 +8,28 @@ extension in vscode.
 We use the [Seeed Studio XIAO esp32c3
 board](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html).
 
+## Pin Assignment
+
+**4 Peristaltic Pumps**
+
+- `PUMP_CTRL0`: `GPIO6`
+- `PUMP_CTRL1`: `GPIO5`
+- `PUMP_CTRL2`: `GPIO4`
+- `PUMP_CTRL3`: `GPIO3`
+
+[**Lift Motor**](https://www.adafruit.com/product/3190)
+- `MOTOR_Z_UP`: `GPIO9` (PWM)
+- `MOTOR_Z_DOWN`: `GPIO8` (PWM)
+
+**Stepper Motor**
+- `MOTOR_X_STEP`: `GPIO20` (PWM)
+- `MOTOR_X_DIR`: `GPIO21`
+
+**Misc**
+- `End Switch`: `GPIO7`
+- `Neopixel`: `GPIO2` (PWM)
+- `Force Stop Switch`: `GPIO10`
+
 ## Installation
 
 1. Install the Rust programmin language with [rustup](https://rustup.rs/).

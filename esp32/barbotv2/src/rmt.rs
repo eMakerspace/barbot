@@ -5,23 +5,188 @@ use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 
 use critical_section::{CriticalSection, Mutex};
-use enumset::EnumSet;
+use enumset::{EnumSet, EnumSetType};
 use esp_hal::asynch::AtomicWaker;
 use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::peripheral::Peripheral;
+use esp_hal::gpio::Level;
 use esp_hal::peripherals::RMT;
-use esp_hal::rmt::{Channel, Event, Rmt, TxChannelConfig, TxChannelCreator, TxChannelInternal};
+use esp_hal::rmt::{Channel, Rmt, TxChannelConfig, TxChannelCreator};
 use esp_hal::time::Rate;
 use esp_hal::{handler, Blocking};
 use portable_atomic::{AtomicPtr, Ordering};
 use portable_atomic_util::{Arc, Weak};
 
-type RmtChan = Channel<Blocking, 0>;
-
 pub const RMT_RAM_START: usize = 0x60016400;
 pub const RMT_CHANNEL_RAM_SIZE: usize = 48;
 pub const USED_CHANNELS: usize = 4;
 pub const HALF_USED_CHANNELS: usize = 2;
+
+#[derive(Debug, EnumSetType)]
+enum Event {
+    Error,
+    Threshold,
+    End,
+    LoopCount,
+}
+
+struct RmtChan;
+
+#[allow(dead_code)]
+impl RmtChan {
+    const CH_IDX: usize = 0;
+
+    #[inline]
+    pub fn update() {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(Self::CH_IDX)
+            .modify(|_, w| w.conf_update().set_bit());
+    }
+
+    pub fn set_memsize(value: u8) {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(Self::CH_IDX)
+            .modify(|_, w| unsafe { w.mem_size().bits(value) });
+    }
+
+    #[inline]
+    pub fn clear_tx_interrupts() {
+        let rmt = RMT::regs();
+
+        rmt.int_clr().write(|w| {
+            w.ch_tx_end(Self::CH_IDX as u8).set_bit();
+            w.ch_tx_err(Self::CH_IDX as u8).set_bit();
+            w.ch_tx_loop(Self::CH_IDX as u8).set_bit();
+            w.ch_tx_thr_event(Self::CH_IDX as u8).set_bit()
+        });
+    }
+
+    #[inline]
+    pub fn set_tx_continuous(continuous: bool) {
+        let rmt = RMT::regs();
+
+        rmt.ch_tx_conf0(Self::CH_IDX.into())
+            .modify(|_, w| w.tx_conti_mode().bit(continuous));
+    }
+
+    #[inline]
+    pub fn set_tx_wrap_mode(wrap: bool) {
+        let rmt = RMT::regs();
+
+        rmt.ch_tx_conf0(Self::CH_IDX.into())
+            .modify(|_, w| w.mem_tx_wrap_en().bit(wrap));
+    }
+
+    pub fn set_tx_carrier(carrier: bool, high: u16, low: u16, level: Level) {
+        let rmt = RMT::regs();
+
+        rmt.chcarrier_duty(Self::CH_IDX.into())
+            .write(|w| unsafe { w.carrier_high().bits(high).carrier_low().bits(low) });
+
+        rmt.ch_tx_conf0(Self::CH_IDX.into()).modify(|_, w| {
+            w.carrier_en().bit(carrier);
+            w.carrier_eff_en().set_bit();
+            w.carrier_out_lv().bit(level.into())
+        });
+    }
+
+    pub fn set_tx_idle_output(enable: bool, level: Level) {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(Self::CH_IDX.into())
+            .modify(|_, w| w.idle_out_en().bit(enable).idle_out_lv().bit(level.into()));
+    }
+
+    #[inline]
+    pub fn start_tx() {
+        let rmt = RMT::regs();
+
+        rmt.ch_tx_conf0(Self::CH_IDX.into()).modify(|_, w| {
+            w.mem_rd_rst().set_bit();
+            w.apb_mem_rst().set_bit();
+            w.tx_start().set_bit()
+        });
+    }
+
+    // Return the first flag that is set of, in order of decreasing priority,
+    // Event::Error, Event::End, Event::LoopCount, Event::Threshold
+    #[inline]
+    pub fn get_tx_status() -> Option<Event> {
+        let rmt = RMT::regs();
+        let reg = rmt.int_raw().read();
+        let ch = Self::CH_IDX as u8;
+
+        if reg.ch_tx_end(ch).bit() {
+            Some(Event::End)
+        } else if reg.ch_tx_err(ch).bit() {
+            Some(Event::Error)
+        } else if reg.ch_tx_loop(ch).bit() {
+            Some(Event::LoopCount)
+        } else if reg.ch_tx_thr_event(ch).bit() {
+            Some(Event::Threshold)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn reset_tx_threshold_set() {
+        let rmt = RMT::regs();
+        rmt.int_clr()
+            .write(|w| w.ch_tx_thr_event(Self::CH_IDX as u8).set_bit());
+    }
+
+    #[inline]
+    pub fn set_tx_threshold(threshold: u8) {
+        let rmt = RMT::regs();
+        rmt.ch_tx_lim(Self::CH_IDX.into())
+            .modify(|_, w| unsafe { w.tx_lim().bits(threshold as u16) });
+    }
+
+    #[inline]
+    pub fn is_tx_loopcount_interrupt_set() -> bool {
+        let rmt = RMT::regs();
+        rmt.int_raw().read().ch_tx_loop(Self::CH_IDX as u8).bit()
+    }
+
+    // Returns whether stopping was immediate, or needs to wait for tx end.
+    // Due to inlining, the compiler should be able to eliminate code in the caller that
+    // depends on this.
+    //
+    // Requires an update() call
+    #[inline]
+    pub fn stop_tx(&self) -> bool {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(Self::CH_IDX.into())
+            .modify(|_, w| w.tx_stop().set_bit());
+        true
+    }
+
+    #[inline]
+    pub fn set_tx_interrupt(events: EnumSet<Event>, enable: bool) {
+        let rmt = RMT::regs();
+        rmt.int_ena().modify(|_, w| {
+            if events.contains(Event::Error) {
+                w.ch_tx_err(Self::CH_IDX as u8).bit(enable);
+            }
+            if events.contains(Event::End) {
+                w.ch_tx_end(Self::CH_IDX as u8).bit(enable);
+            }
+            if events.contains(Event::Threshold) {
+                w.ch_tx_thr_event(Self::CH_IDX as u8).bit(enable);
+            }
+            w
+        });
+    }
+
+    #[inline]
+    fn listen_tx_interrupt(event: impl Into<EnumSet<Event>>) {
+        Self::set_tx_interrupt(event.into(), true);
+    }
+
+    #[inline]
+    fn unlisten_tx_interrupt(event: impl Into<EnumSet<Event>>) {
+        Self::set_tx_interrupt(event.into(), false);
+    }
+}
 
 static RMT_DATA: AtomicPtr<RmtData> = AtomicPtr::new(core::ptr::null_mut());
 
@@ -85,7 +250,7 @@ impl RmtData {
             RmtChan::start_tx();
             RmtChan::update();
 
-            RmtChan::unlisten_interrupt(Event::Threshold);
+            RmtChan::unlisten_tx_interrupt(Event::Threshold);
             unsafe {
                 RmtData::drop_weak();
             }
@@ -139,7 +304,7 @@ fn rmt_interrupt_handle() {
     }
 
     if st.ch0_tx_end().bit() || st.ch0_tx_err().bit() {
-        RmtChan::clear_interrupts();
+        RmtChan::clear_tx_interrupts();
         let Some(rmt_data) = (unsafe { RmtData::try_get_inst() }) else {
             return;
         };
@@ -165,12 +330,12 @@ fn rmt_interrupt_handle() {
 }
 
 /// A async RMT driver that allows sending iterators.
-pub struct IterRmt {
-    _rmt: RmtChan,
+pub struct IterRmt<'ch> {
+    _rmt: Channel<'ch, Blocking, esp_hal::rmt::Tx>,
     data: Arc<RmtData>,
 }
 
-impl IterRmt {
+impl<'rmt> IterRmt<'rmt> {
     /// Create a new RMT that allows sending iterators.
     ///
     /// - `rmt_periph`: The RMT peripheral.
@@ -178,19 +343,19 @@ impl IterRmt {
     /// - `gpio`: The output GPIO where the waveform is output.
     /// - `tx_cfg`: The transmission configuration.
     pub fn new(
-        rmt_periph: impl Peripheral<P = RMT>,
+        rmt_periph: RMT<'rmt>,
         tick_rate: Rate,
-        gpio: impl Peripheral<P = impl PeripheralOutput>,
+        gpio: impl PeripheralOutput<'rmt>,
         tx_cfg: TxChannelConfig,
-    ) -> Self {
+    ) -> IterRmt<'rmt> {
         let mut rmt = Rmt::new(rmt_periph, tick_rate).unwrap();
         rmt.set_interrupt_handler(rmt_interrupt_handle);
-        let rmt = rmt.channel0.configure(gpio, tx_cfg).unwrap();
+        let rmt = rmt.channel0.configure_tx(gpio, tx_cfg).unwrap();
 
         RmtChan::set_memsize(USED_CHANNELS as u8); // Use the RAM of all four channels.
-        RmtChan::set_threshold((RMT_CHANNEL_RAM_SIZE * HALF_USED_CHANNELS) as u8);
-        RmtChan::set_continuous(false);
-        RmtChan::set_wrap_mode(true);
+        RmtChan::set_tx_threshold((RMT_CHANNEL_RAM_SIZE * HALF_USED_CHANNELS) as u8);
+        RmtChan::set_tx_continuous(false);
+        RmtChan::set_tx_wrap_mode(true);
         RmtChan::update();
 
         Self {
@@ -224,8 +389,8 @@ impl IterRmt {
             status: EnumSet::empty(),
         };
 
-        RmtChan::clear_interrupts();
-        RmtChan::listen_interrupt(Event::Error | Event::Threshold | Event::End);
+        RmtChan::clear_tx_interrupts();
+        RmtChan::listen_tx_interrupt(Event::Error | Event::Threshold | Event::End);
 
         (data_inner.handler)(&mut data_inner); // Fill first half.
         (data_inner.handler)(&mut data_inner); // Fill second half.

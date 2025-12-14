@@ -12,7 +12,6 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::time::Rate;
-use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx};
 use esp_println::print;
 use futures::{select_biased, FutureExt};
@@ -20,6 +19,8 @@ use log::info;
 use num_traits::float::FloatCore;
 use num_traits::ToPrimitive;
 use stepper::Stepper;
+
+esp_bootloader_esp_idf::esp_app_desc!();
 
 pub mod rmt;
 pub mod stepgen;
@@ -163,7 +164,7 @@ async fn serial_reader(
 
 #[embassy_executor::task]
 async fn stepper_task(
-    mut stepper: Stepper,
+    mut stepper: Stepper<'static>,
     mut end_stop: Input<'static>,
     stepper_chan: &'static StepperChannel,
 ) {
@@ -200,16 +201,18 @@ async fn stepper_task(
         }
     }
 
-    embassy_executor::Spawner::for_current_executor()
-        .await
-        .must_spawn(stepper_signal_task(
-            &STOP_SIGNAL,
-            &FORCE_STOP_SIGNAL,
-            &CMD_SIGNAL,
-            stepper_chan,
-        ));
+    unsafe {
+        embassy_executor::Spawner::for_current_executor()
+            .await
+            .must_spawn(stepper_signal_task(
+                &STOP_SIGNAL,
+                &FORCE_STOP_SIGNAL,
+                &CMD_SIGNAL,
+                stepper_chan,
+            ));
+    }
 
-    async fn home_stepper(_stepper: &mut Stepper, _end_stop: &mut Input<'static>) -> bool {
+    async fn home_stepper(_stepper: &mut Stepper<'static>, _end_stop: &mut Input<'static>) -> bool {
         // TODO
         false
     }
@@ -259,7 +262,7 @@ async fn stepper_task(
     }
 }
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();
 
@@ -267,8 +270,9 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
-    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
+    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
+    let sw_interrupt = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     info!("Startup...");
 
@@ -308,8 +312,8 @@ async fn main(spawner: Spawner) {
     );
 
     // Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
-    stepper.set_acceleration(300.0 * 8.0); // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    stepper.set_max_speed(200.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
+    stepper.set_acceleration(800.0 * 8.0); // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    stepper.set_max_speed(1000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
 
     let end_stop = Input::new(
         peripherals.GPIO10,

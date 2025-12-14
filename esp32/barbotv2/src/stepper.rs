@@ -1,7 +1,6 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use esp_hal::gpio::{Level, Output, OutputConfig, OutputPin};
-use esp_hal::peripheral::Peripheral;
 use esp_hal::rmt::PulseCode;
 use esp_hal::time::Rate;
 use num_traits::float::FloatCore;
@@ -12,8 +11,8 @@ use crate::stepgen::{self, Stepgen};
 pub type StopSignal = Signal<CriticalSectionRawMutex, ()>;
 
 /// Stepper motor driver with absolute positioning and acceleration/deacceleration curve.
-pub struct Stepper {
-    rmt: IterRmt,
+pub struct Stepper<'rmt> {
+    rmt: IterRmt<'rmt>,
     dir_pin: Output<'static>,
     tick_rate: Rate,
     acceleration: u32,
@@ -23,7 +22,7 @@ pub struct Stepper {
     curr_pos: i32,
 }
 
-impl Stepper {
+impl<'rmt> Stepper<'rmt> {
     const N_DECIMALS: u32 = 8;
     const DECIMALS_FACT: f32 = (1 << Self::N_DECIMALS) as f32;
 
@@ -37,9 +36,9 @@ impl Stepper {
     ///   [`Level::High`] is output on the dir pin, otherwise if `false` it turns in the
     ///   negative direction.
     pub fn new(
-        rmt: IterRmt,
+        rmt: IterRmt<'rmt>,
         tick_rate: Rate,
-        dir_pin: impl Peripheral<P = impl OutputPin> + 'static,
+        dir_pin: impl OutputPin + 'static,
         dir_high_positive: bool,
     ) -> Self {
         Self {
@@ -138,12 +137,15 @@ impl Stepper {
                 let second_period = total_delay.min(MAX_PERIOD - 1).max(1);
                 let first_period = total_delay.saturating_sub(second_period).max(1);
 
-                Some(PulseCode::new(
-                    Level::High,
-                    first_period as u16,
-                    Level::Low,
-                    second_period as u16,
-                ))
+                Some(
+                    PulseCode::new(
+                        Level::High,
+                        first_period as u16,
+                        Level::Low,
+                        second_period as u16,
+                    )
+                    .into(),
+                )
             }
         }
 
