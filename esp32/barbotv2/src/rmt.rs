@@ -18,8 +18,8 @@ use portable_atomic_util::{Arc, Weak};
 
 pub const RMT_RAM_START: usize = 0x60016400;
 pub const RMT_CHANNEL_RAM_SIZE: usize = 48;
-pub const USED_CHANNELS: usize = 4;
-pub const HALF_USED_CHANNELS: usize = 2;
+pub const USED_CHANNELS: usize = 2;
+pub const HALF_USED_CHANNELS: usize = 1;
 
 #[derive(Debug, EnumSetType)]
 enum Event {

@@ -1,266 +1,42 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::signal::Signal;
-use embedded_io_async::Read;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::time::Rate;
-use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx};
-use esp_println::print;
-use futures::{select_biased, FutureExt};
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
-use num_traits::float::FloatCore;
-use num_traits::ToPrimitive;
 use stepper::Stepper;
+
+use crate::cmd::{CmdChannel, StepperCmdSignal, StopChannel};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+
+pub mod cmd;
 pub mod rmt;
 pub mod stepgen;
 pub mod stepper;
+pub mod tasks;
+pub mod utils;
 
 extern crate alloc;
 
-#[derive(Debug)]
-enum StepperCmd {
-    Stop { force: bool },
-    GoTo(i32),
-    Home(),
-}
+// Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
+const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
+    .with_acceleration(800.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    .with_max_speed(1000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
 
-type StepperChannel = Channel<CriticalSectionRawMutex, StepperCmd, 1>;
+const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
+    .with_acceleration(800.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    .with_max_speed(100.0 * 8.0); // 0.1 turns / seccond (in simulation, 200 steps / turn)
 
-static SHOULD_ECHO: AtomicBool = AtomicBool::new(true);
-
-async fn handle_cmd(cmd: &str, stepper_chan: &'static StepperChannel) {
-    let gcmd = match gcode::parse(cmd).next() {
-        Some(cmd) => cmd,
-        None => {
-            log::warn!("received cmd '{cmd}' is not valid gcode");
-            return;
-        }
-    };
-
-    let invalid_cmd = || {
-        log::error!("invalid command: {gcmd}");
-    };
-
-    match gcmd.mnemonic() {
-        gcode::Mnemonic::General => match gcmd.major_number() {
-            // `G0 X{position}` Move stepper motor to step {position}.
-            0 => {
-                if let Some(loc) = gcmd.value_for('X') {
-                    let Some(loc) = (loc * 8.0).round().to_i32() else {
-                        invalid_cmd();
-                        return;
-                    };
-
-                    stepper_chan.send(StepperCmd::GoTo(loc)).await;
-                }
-            }
-            // `G28` start homing.
-            28 => {
-                stepper_chan.send(StepperCmd::Home()).await;
-            }
-            _ => invalid_cmd(),
-        },
-        gcode::Mnemonic::Miscellaneous => match gcmd.major_number() {
-            // Stop the stepper motor.
-            // - `M0` stops slowly.
-            // - `M0.1` stops immediately.
-            0 => {
-                stepper_chan
-                    .send(StepperCmd::Stop {
-                        force: gcmd.minor_number() == 1,
-                    })
-                    .await;
-            }
-            // `M10` Toggle local echo.
-            10 => {
-                SHOULD_ECHO.store(!SHOULD_ECHO.load(Ordering::Relaxed), Ordering::SeqCst);
-            }
-            _ => invalid_cmd(),
-        },
-        _ => invalid_cmd(),
-    }
-}
-
-/// Read from the USB serial and execute the commands
-#[embassy_executor::task]
-async fn serial_reader(
-    mut rx: UsbSerialJtagRx<'static, esp_hal::Async>,
-    stepper_chan: &'static StepperChannel,
-) {
-    let mut buf = [0_u8; 128];
-
-    let mut total_read: usize = 0;
-    let mut ignore_next_command = false;
-    loop {
-        let count_read = match rx.read(&mut buf[total_read..]).await {
-            Err(err) => {
-                log::error!("{err}");
-                continue;
-            }
-            Ok(val) => val,
-        };
-
-        // Echo.
-        let echo = SHOULD_ECHO.load(Ordering::Relaxed);
-        if echo {
-            esp_println::Printer::write_bytes(&buf[total_read..total_read + count_read]);
-        }
-
-        if let Some((idx, c)) = buf[total_read..total_read + count_read]
-            .iter()
-            .enumerate()
-            .find(|(_i, &c)| c == b'\r' || c == b'\n')
-        {
-            if echo {
-                // Echo the appropriate missing character so that we echo a CRLF or LFCR,
-                // for a true linebreak.
-                if *c == b'\n' {
-                    print!("\r");
-                } else if total_read + idx + 1 == total_read + count_read {
-                    print!("\n");
-                }
-            }
-
-            total_read += idx;
-            let s = match core::str::from_utf8(&buf[..total_read]) {
-                Ok(s) => s,
-                Err(_) => {
-                    log::warn!("invalid utf-8 received");
-                    continue;
-                }
-            };
-
-            if !ignore_next_command {
-                handle_cmd(s.trim(), stepper_chan).await;
-            }
-            ignore_next_command = false;
-
-            let range_start = total_read + 1;
-            let range_end = total_read - idx + count_read;
-            buf.copy_within(range_start..range_end, 0);
-            total_read = count_read - idx - 1;
-        } else {
-            total_read += count_read;
-        }
-
-        if total_read == buf.len() {
-            log::warn!("ignoring command, buffer full");
-            total_read = 0;
-            ignore_next_command = true;
-        }
-    }
-}
-
-#[embassy_executor::task]
-async fn stepper_task(
-    mut stepper: Stepper<'static>,
-    mut end_stop: Input<'static>,
-    stepper_chan: &'static StepperChannel,
-) {
-    static STOP_SIGNAL: stepper::StopSignal = stepper::StopSignal::new();
-    static CMD_SIGNAL: Signal<CriticalSectionRawMutex, StepperCmd> = Signal::new();
-    static FORCE_STOP_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-    #[embassy_executor::task]
-    async fn stepper_signal_task(
-        stop_sig: &'static stepper::StopSignal,
-        force_stop_sig: &'static Signal<CriticalSectionRawMutex, ()>,
-        cmd_sig: &'static Signal<CriticalSectionRawMutex, StepperCmd>,
-        input_sig: &'static StepperChannel,
-    ) {
-        loop {
-            match input_sig.receive().await {
-                StepperCmd::Stop { force } => {
-                    if force {
-                        stop_sig.signal(());
-                        force_stop_sig.signal(());
-                    } else {
-                        log::info!("Stopping early from command");
-                        stop_sig.signal(());
-                    }
-                }
-                cmd => {
-                    if cmd_sig.signaled() {
-                        log::warn!("Stepper busy, dropping cmd: {cmd:?}");
-                        continue;
-                    }
-                    cmd_sig.signal(cmd);
-                }
-            }
-        }
-    }
-
-    unsafe {
-        embassy_executor::Spawner::for_current_executor()
-            .await
-            .must_spawn(stepper_signal_task(
-                &STOP_SIGNAL,
-                &FORCE_STOP_SIGNAL,
-                &CMD_SIGNAL,
-                stepper_chan,
-            ));
-    }
-
-    async fn home_stepper(_stepper: &mut Stepper<'static>, _end_stop: &mut Input<'static>) -> bool {
-        // TODO
-        false
-    }
-
-    let mut homing_needed = false;
-    stepper.set_stop_signal(&STOP_SIGNAL);
-
-    loop {
-        let pos = match CMD_SIGNAL.wait().await {
-            StepperCmd::GoTo(pos) => {
-                if !homing_needed {
-                    pos
-                } else {
-                    log::warn!("Ignoring command, homing required");
-                    continue;
-                }
-            }
-            StepperCmd::Home() => {
-                log::info!("Homing..");
-                homing_needed = home_stepper(&mut stepper, &mut end_stop).await;
-                continue;
-            }
-            _ => unreachable!(),
-        };
-
-        let res = select_biased! {
-            _ = end_stop.wait_for_low().fuse() => {
-                log::warn!("End stop reached, stopping immediately");
-                STOP_SIGNAL.reset();
-                FORCE_STOP_SIGNAL.reset();
-                homing_needed = false;
-                stepper.set_curr_pos(0);
-                continue;
-            },
-            _ = FORCE_STOP_SIGNAL.wait().fuse() => {
-                log::warn!("Stopping immediately from command");
-                STOP_SIGNAL.reset();
-                homing_needed = true;
-                continue;
-            },
-            res = stepper.run_to_pos(pos).fuse() => res
-        };
-        if let Err(err) = res {
-            log::warn!("Stepper moving failed: {err:?}");
-            continue;
-        }
-    }
-}
+static STOP_CHANNEL: StopChannel = StopChannel::new();
+static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
+static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -271,10 +47,11 @@ async fn main(spawner: Spawner) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
-    let sw_interrupt = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let sw_interrupt =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    info!("Startup...");
+    info!("Startup...\r");
 
     // let timer1 = TimerGroup::new(peripherals.TIMG0);
     // let _init = esp_wifi::init(
@@ -284,15 +61,24 @@ async fn main(spawner: Spawner) {
     // )
     // .unwrap();
     //
-    static STEPPER_CHANNEL: StepperChannel = StepperChannel::new();
 
     let (usb_rx, _) = UsbSerialJtag::new(peripherals.USB_DEVICE)
         .into_async()
         .split();
+    spawner.must_spawn(tasks::serial::serial_reader(
+        usb_rx,
+        &CMD_CHANNEL,
+        STOP_CHANNEL.publisher().unwrap(),
+    ));
 
-    spawner.must_spawn(serial_reader(usb_rx, &STEPPER_CHANNEL));
-
-    info!("Barbot HAT v{} running", env!("CARGO_PKG_VERSION"));
+    let emergency_stop = Input::new(
+        peripherals.GPIO9,
+        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
+    );
+    spawner.must_spawn(tasks::emergency_stop_monitor(
+        emergency_stop,
+        STOP_CHANNEL.immediate_publisher(),
+    ));
 
     let tx_cfg = esp_hal::rmt::TxChannelConfig::default()
         .with_idle_output(true)
@@ -310,14 +96,27 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO21,
         false,
     );
+    stepper.set_accel_speed(STEPPER_NORMAL_ACCEL_SPEED).unwrap();
+    STEPPER_HOMING_ACCEL_SPEED
+        .validate_for_stepper(&stepper)
+        .unwrap();
 
-    // Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
-    stepper.set_acceleration(800.0 * 8.0); // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    stepper.set_max_speed(1000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
-
-    let end_stop = Input::new(
-        peripherals.GPIO10,
+    let end_switch = Input::new(
+        peripherals.GPIO7,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
-    spawner.must_spawn(stepper_task(stepper, end_stop, &STEPPER_CHANNEL));
+    spawner.must_spawn(tasks::stepper::stepper_task(
+        stepper,
+        end_switch,
+        &STEPPER_CMD_SIG,
+        STOP_CHANNEL.subscriber().unwrap(),
+        spawner,
+    ));
+
+    spawner.must_spawn(tasks::route_cmd::route_cmd(tasks::route_cmd::HandleCmd {
+        cmd_chan: &CMD_CHANNEL,
+        stepper_sig: &STEPPER_CMD_SIG,
+    }));
+
+    info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));
 }

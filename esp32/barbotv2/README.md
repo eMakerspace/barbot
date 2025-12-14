@@ -18,7 +18,7 @@ board](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html).
 - `PUMP_CTRL3`: `GPIO3`
 
 [**Lift Motor**](https://www.adafruit.com/product/3190)
-- `MOTOR_Z_UP`: `GPIO9` (PWM)
+- `MOTOR_Z_UP`: `GPIO10` (PWM)
 - `MOTOR_Z_DOWN`: `GPIO8` (PWM)
 
 **Stepper Motor**
@@ -26,9 +26,9 @@ board](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html).
 - `MOTOR_X_DIR`: `GPIO21`
 
 **Misc**
-- `End Switch`: `GPIO7`
+- `End Switch`: `GPIO7` (active low)
 - `Neopixel`: `GPIO2` (PWM)
-- `Force Stop Switch`: `GPIO10`
+- `Emergency Stop Switch`: `GPIO9` (active low)
 
 ## Installation
 
@@ -60,11 +60,11 @@ and should determine the right chip if it is connected with USB.
 - [X] Project setup, receiving commands, wokwi
 - [X] Control stepper motor
 - [ ] Control pumps
-- [ ] Stepper motor homing (with end-switch on `GPIO10`)
-    - [X] Reacting to end-switch (stops the stepper motor immediately).
+- [X] Stepper motor homing (with end-switch on `GPIO7`)
+    - [X] Reacting to emergency stop (stops the stepper motor immediately).
 - [X] G-code parsing, commands
     - [X] `G0 X{position}` for moving the stepper motor to step `{position}`.
-    - [ ] `G28` to start homing.
+    - [X] `G28` to start homing.
     - [X] `M0` to stop the stepper motor slowly.
     - [X] `M0.1` to stop the stepper motor immediately (without deccelerating).
     - [X] `M10` to toggle serial echo.
