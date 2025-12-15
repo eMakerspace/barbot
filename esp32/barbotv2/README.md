@@ -60,6 +60,8 @@ and should determine the right chip if it is connected with USB.
 - [X] Project setup, receiving commands, wokwi
 - [X] Control stepper motor
 - [ ] Control pumps
+- [ ] Control lift motor
+- [ ] Control LEDs
 - [X] Stepper motor homing (with end-switch on `GPIO7`)
     - [X] Reacting to emergency stop (stops the stepper motor immediately).
 - [X] G-code parsing, commands

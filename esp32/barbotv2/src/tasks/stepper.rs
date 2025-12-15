@@ -77,6 +77,8 @@ async fn route_end_switch_trigger(
             end_switch_sig.signal(());
         }
 
+        // If we are doing a homing move we want to gracefully stop when the end switch
+        // has the set target level.
         let maybe_target_level = homing_move_target_level.lock(|c| c.get());
         match (maybe_target_level, level) {
             (Some(Level::High), Level::High) | (Some(Level::Low), Level::Low) => {
