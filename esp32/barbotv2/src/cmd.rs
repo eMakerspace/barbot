@@ -5,8 +5,10 @@ use embassy_sync::pubsub::{self, PubSubChannel};
 use crate::utils::BiSignal;
 
 #[derive(Debug, Clone)]
-pub struct StopCmd {
-    pub force: bool,
+pub enum StopCmd {
+    Immediate,
+    Graceful,
+    Continue
 }
 
 /// Channel for emergency stop commands.

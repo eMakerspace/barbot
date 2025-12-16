@@ -69,4 +69,5 @@ and should determine the right chip if it is connected with USB.
     - [X] `G28` to start homing.
     - [X] `M0` to stop the stepper motor slowly.
     - [X] `M0.1` to stop the stepper motor immediately (without deccelerating).
+    - [X] `M1` recorvers from stop command.
     - [X] `M10` to toggle serial echo.

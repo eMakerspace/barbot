@@ -4,9 +4,9 @@ use embassy_executor::Spawner;
 use esp_hal::gpio::{Input, Level};
 use esp_println::dbg;
 use futures::future::select;
-use futures::{select_biased, FutureExt};
+use futures::{FutureExt, select_biased};
 
-use crate::cmd::{StepperCmd, StepperCmdSignal, StopCmdSub};
+use crate::cmd::{StepperCmd, StepperCmdSignal, StopCmd, StopCmdSub};
 use crate::stepper::{self, Dir, Stepper};
 use crate::utils::{Mutex, Signal};
 
@@ -101,10 +101,13 @@ async fn stepper_route_stop(
 ) {
     loop {
         let stop_cmd = input_stop.next_message_pure().await;
-        if stop_cmd.force {
-            emergency_stop_sig.signal(());
-        } else {
-            stepper_stop_sig.signal(());
+        match stop_cmd {
+            StopCmd::Immediate => emergency_stop_sig.signal(()),
+            StopCmd::Graceful => stepper_stop_sig.signal(()),
+            StopCmd::Continue => {
+                emergency_stop_sig.reset();
+                stepper_stop_sig.reset();
+            }
         }
     }
 }
@@ -146,7 +149,7 @@ pub async fn stepper_task(
                 if !homing_state.homing_needed {
                     pos
                 } else {
-                    log::warn!("Ignoring command, homing required");
+                    log::warn!("Ignoring command, homing required\r");
                     continue;
                 }
             }

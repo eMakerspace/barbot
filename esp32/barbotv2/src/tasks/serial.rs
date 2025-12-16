@@ -118,13 +118,17 @@ async fn handle_cmd(
             // Stop the stepper motor.
             // - `M0.1` stops immediately.
             0 if gcmd.minor_number() == 1 => {
-                stop_pub.publish_immediate(StopCmd { force: true });
+                stop_pub.publish_immediate(StopCmd::Immediate);
                 log::info!("Stopping immediately from command");
             }
             // - `M0` stops slowly.
             0 => {
-                stop_pub.publish(StopCmd { force: false }).await;
+                stop_pub.publish(StopCmd::Graceful).await;
                 log::info!("Stopping early from command");
+            }
+            1 => {
+                stop_pub.publish(StopCmd::Continue).await;
+                log::info!("Continuing from stop command");
             }
             // `M10` Toggle local echo.
             10 => {
