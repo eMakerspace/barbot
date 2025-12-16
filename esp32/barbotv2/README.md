@@ -59,13 +59,15 @@ and should determine the right chip if it is connected with USB.
 
 - [X] Project setup, receiving commands, wokwi
 - [X] Control stepper motor
-- [ ] Control pumps
+- [X] Control pumps
 - [ ] Control lift motor
 - [ ] Control LEDs
 - [X] Stepper motor homing (with end-switch on `GPIO7`)
     - [X] Reacting to emergency stop (stops the stepper motor immediately).
 - [X] G-code parsing, commands
     - [X] `G0 X{position}` for moving the stepper motor to step `{position}`.
+    - [X] `G2 I{pump} D{time_ms}` activate pump for duration `{time_ms}` milliseconds.
+    - [X] `G2.1 I{pump} D{time_ms}` activate pump for `{time_ms}` milliseconds and wait.
     - [X] `G28` to start homing.
     - [X] `M0` to stop the stepper motor slowly.
     - [X] `M0.1` to stop the stepper motor immediately (without deccelerating).

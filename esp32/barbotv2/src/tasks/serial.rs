@@ -1,10 +1,10 @@
 use embedded_io_async::Read;
 use esp_hal::usb_serial_jtag::UsbSerialJtagRx;
 use esp_println::print;
-use num_traits::float::FloatCore;
 use num_traits::ToPrimitive;
+use num_traits::float::FloatCore;
 
-use crate::cmd::{Cmd, CmdChannel, StepperCmd, StopCmd, StopCmdPub};
+use crate::cmd::{Cmd, CmdChannel, PumpCmd, StepperCmd, StopCmd, StopCmdPub};
 
 /// Read from the USB serial and execute the commands
 #[embassy_executor::task]
@@ -92,7 +92,11 @@ async fn handle_cmd(
     };
 
     let invalid_cmd = || {
-        log::error!("invalid command: {gcmd}");
+        log::error!("invalid command \"{gcmd}\"\r");
+    };
+
+    let invalid_cmd_msg = |msg: &str| {
+        log::error!("invalid command \"{gcmd}\": {msg}\r");
     };
 
     match gcmd.mnemonic() {
@@ -101,12 +105,44 @@ async fn handle_cmd(
             0 => {
                 if let Some(loc) = gcmd.value_for('X') {
                     let Some(loc) = (loc * 8.0).round().to_i32() else {
-                        invalid_cmd();
+                        invalid_cmd_msg("X parameter out of range");
                         return;
                     };
 
                     cmd_chan.send(Cmd::Stepper(StepperCmd::GoTo(loc))).await;
+                } else {
+                    invalid_cmd_msg("missing X parameter");
+                    return;
                 }
+            }
+            // `G2 N{pump_index} T{time_ms}` Activate pump number {pump_index} for {time_ms} milliseconds.
+            // `G2.1 N{pump_index} T{time_ms}` Same as G2, but blocks until the command is complete.
+            2 => {
+                let Some(pump_index) = gcmd.value_for('I') else {
+                    invalid_cmd_msg("missing I<pump_index> parameter");
+                    return;
+                };
+                let Some(time_ms) = gcmd.value_for('D') else {
+                    invalid_cmd_msg("missing D<time_ms> parameter");
+                    return;
+                };
+
+                let Some(pump_index) = pump_index.round().to_u8() else {
+                    invalid_cmd_msg("I parameter out of range");
+                    return;
+                };
+                let Some(time_ms) = time_ms.round().to_u32() else {
+                    invalid_cmd_msg("D parameter out of range");
+                    return;
+                };
+
+                cmd_chan
+                    .send(Cmd::Pump(PumpCmd {
+                        index: pump_index,
+                        duration_ms: time_ms,
+                        wait: gcmd.minor_number() == 1,
+                    }))
+                    .await;
             }
             // `G28` start homing.
             28 => {
@@ -126,6 +162,7 @@ async fn handle_cmd(
                 stop_pub.publish(StopCmd::Graceful).await;
                 log::info!("Stopping early from command");
             }
+            // `M1` recovers from stop.
             1 => {
                 stop_pub.publish(StopCmd::Continue).await;
                 log::info!("Continuing from stop command");

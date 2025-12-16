@@ -7,6 +7,7 @@ use crate::cmd::{StopCmd, StopCmdImmediatePub};
 pub mod route_cmd;
 pub mod serial;
 pub mod stepper;
+pub mod pump;
 
 #[embassy_executor::task]
 pub async fn emergency_stop_monitor(

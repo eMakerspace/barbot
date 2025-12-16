@@ -215,8 +215,11 @@ pub mod bi_signal {
                             value,
                         })
                     }
-                    State::SenderWaiting { .. } => {
-                        unreachable!("invalid state");
+                    State::SenderWaiting { sender_waker } => {
+                        // We called receive before comitting the previously received
+                        // value (thus the sender is still waiting), so just wait again.
+                        cell.set(State::SenderWaiting { sender_waker });
+                        Poll::Pending
                     }
                 }
             })
@@ -247,5 +250,13 @@ pub mod bi_signal {
 }
 
 pub use bi_signal::{BiSignal, BiSignalValue};
+use esp_hal::gpio::Level;
 pub type Mutex<T> = embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, T>;
 pub type Signal<T> = embassy_sync::signal::Signal<CriticalSectionRawMutex, T>;
+
+pub const fn invert_level(level: Level) -> Level {
+    match level {
+        Level::High => Level::Low,
+        Level::Low => Level::High,
+    }
+}

@@ -4,7 +4,7 @@
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Input, InputConfig};
+use esp_hal::gpio::{self, Input, InputConfig, Output};
 use esp_hal::time::Rate;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
@@ -35,6 +35,7 @@ const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpee
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
+static PUMP_CMD_SIG: crate::cmd::PumpCmdSignal = crate::cmd::PumpCmdSignal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -113,7 +114,21 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(tasks::route_cmd::route_cmd(tasks::route_cmd::HandleCmd {
         cmd_chan: &CMD_CHANNEL,
         stepper_sig: &STEPPER_CMD_SIG,
+        pump_sig: &PUMP_CMD_SIG,
+        stop_sub: STOP_CHANNEL.subscriber().unwrap(),
     }));
+
+    let pump_pin_cfg = gpio::OutputConfig::default().with_drive_mode(gpio::DriveMode::PushPull);
+    spawner.must_spawn(tasks::pump::pump_task(
+        &PUMP_CMD_SIG,
+        STOP_CHANNEL.subscriber().unwrap(),
+        [
+            Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+        ],
+    ));
 
     info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));
 }

@@ -2,8 +2,6 @@ use core::cell::Cell;
 
 use embassy_executor::Spawner;
 use esp_hal::gpio::{Input, Level};
-use esp_println::dbg;
-use futures::future::select;
 use futures::{FutureExt, select_biased};
 
 use crate::cmd::{StepperCmd, StepperCmdSignal, StopCmd, StopCmdSub};

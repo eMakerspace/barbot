@@ -4,11 +4,12 @@ use embassy_sync::pubsub::{self, PubSubChannel};
 
 use crate::utils::BiSignal;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum StopCmd {
+    Continue,
     Immediate,
     Graceful,
-    Continue
 }
 
 /// Channel for emergency stop commands.
@@ -30,9 +31,17 @@ pub enum StepperCmd {
 pub type StepperCmdSignal = BiSignal<StepperCmd>;
 
 #[derive(Debug)]
+pub struct PumpCmd {
+    pub index: u8,
+    pub duration_ms: u32,
+    pub wait: bool,
+}
+pub type PumpCmdSignal = BiSignal<PumpCmd>;
+
+#[derive(Debug)]
 pub enum Cmd {
     Stepper(StepperCmd),
-    Pump(),
+    Pump(PumpCmd),
     Led(),
     LiftMotor(),
 }
