@@ -4,7 +4,7 @@ use esp_hal::gpio::{Level, Output, OutputConfig, OutputPin};
 use esp_hal::rmt::PulseCode;
 use esp_hal::time::Rate;
 
-use crate::rmt::IterRmt;
+use crate::rmt::IterRmtChannel;
 use crate::stepgen::{self, Stepgen};
 
 pub type StopSignal = Signal<CriticalSectionRawMutex, ()>;
@@ -81,9 +81,9 @@ impl AccelSpeedConfig {
 
     /// Validate the configuration for the given tick rate.
     fn validate(&self, ticks_per_second: u32) -> stepgen::Result {
-        let mut gen = Stepgen::new(ticks_per_second);
-        gen.set_acceleration(self.acceleration)?;
-        gen.set_target_speed(self.max_speed)?;
+        let mut g = Stepgen::new(ticks_per_second);
+        g.set_acceleration(self.acceleration)?;
+        g.set_target_speed(self.max_speed)?;
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl AccelSpeedConfig {
 
 /// Stepper motor driver with absolute positioning and acceleration/deacceleration curve.
 pub struct Stepper<'rmt> {
-    rmt: IterRmt<'rmt>,
+    rmt: IterRmtChannel<'rmt>,
     dir_pin: Output<'static>,
     tick_rate: Rate,
     accel_speed: AccelSpeedConfig,
@@ -119,7 +119,7 @@ impl<'rmt> Stepper<'rmt> {
     ///   [`Level::High`] is output on the dir pin, otherwise if `false` it turns in the
     ///   negative direction.
     pub fn new(
-        rmt: IterRmt<'rmt>,
+        rmt: IterRmtChannel<'rmt>,
         tick_rate: Rate,
         dir_pin: impl OutputPin + 'static,
         dir_high_positive: bool,
@@ -149,7 +149,7 @@ impl<'rmt> Stepper<'rmt> {
     pub fn set_curr_pos(&mut self, curr_step: i32) {
         self.curr_pos = curr_step;
     }
-    
+
     /// Offset the current absolute motor step position by the given amount of steps.
     pub fn offset_curr_pos(&mut self, offset_steps: i32) {
         self.curr_pos += offset_steps;
@@ -268,16 +268,16 @@ impl<'rmt> Stepper<'rmt> {
     ) -> u32 {
         self.dir_pin.set_level(dir_level);
 
-        let mut gen = Stepgen::new(self.tick_rate.as_hz());
-        gen.set_acceleration(accel_speed.acceleration)
+        let mut g = Stepgen::new(self.tick_rate.as_hz());
+        g.set_acceleration(accel_speed.acceleration)
             .expect("invalid acceleration");
-        gen.set_target_speed(accel_speed.max_speed)
+        g.set_target_speed(accel_speed.max_speed)
             .expect("invalid max speed");
-        gen.set_target_step(steps)
+        g.set_target_step(steps)
             .expect("speed and acceleration are configured");
 
         struct StepIter {
-            gen: Stepgen,
+            g: Stepgen,
             stop_signal: Option<&'static StopSignal>,
         }
 
@@ -292,13 +292,13 @@ impl<'rmt> Stepper<'rmt> {
                     self.stop_signal = None;
                     // Stop signal received, stop the motor by deccelerating with the
                     // configured acceleration.
-                    self.gen
+                    self.g
                         .set_target_step(0)
                         .expect("speed and acceleration are configured");
                 }
 
                 // Get the total step period in RMT ticks.
-                let total_delay = self.gen.next()? >> 7;
+                let total_delay = self.g.next()? >> 7;
 
                 // Split the period of the step into an output high and low part.
                 let second_period = total_delay.min(MAX_PERIOD - 1).max(1);
@@ -317,7 +317,7 @@ impl<'rmt> Stepper<'rmt> {
         }
 
         let step_iter = StepIter {
-            gen,
+            g,
             stop_signal: self.stop_signal,
         };
 
@@ -326,6 +326,6 @@ impl<'rmt> Stepper<'rmt> {
             .transmit(step_iter)
             .await
             .expect("rmt transaction failed");
-        iter.gen.current_step()
+        iter.g.current_step()
     }
 }

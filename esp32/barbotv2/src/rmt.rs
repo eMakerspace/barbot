@@ -1,25 +1,22 @@
 use core::cell::UnsafeCell;
-use core::future::Future;
-use core::iter::{Chain, Fuse, FusedIterator, Once};
+use core::future::poll_fn;
+use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
-use core::ptr::NonNull;
 
 use critical_section::{CriticalSection, Mutex};
 use enumset::{EnumSet, EnumSetType};
 use esp_hal::asynch::AtomicWaker;
 use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::gpio::Level;
+use esp_hal::gpio::{self, Level, OutputConfig};
 use esp_hal::peripherals::RMT;
-use esp_hal::rmt::{Channel, Rmt, TxChannelConfig, TxChannelCreator};
 use esp_hal::time::Rate;
-use esp_hal::{handler, Blocking};
+use esp_hal::{handler, rmt};
 use portable_atomic::{AtomicPtr, Ordering};
 use portable_atomic_util::{Arc, Weak};
 
 pub const RMT_RAM_START: usize = 0x60016400;
 pub const RMT_CHANNEL_RAM_SIZE: usize = 48;
-pub const USED_CHANNELS: usize = 2;
-pub const HALF_USED_CHANNELS: usize = 1;
+pub const NUM_TX_CHANNELS: usize = 2;
 
 #[derive(Debug, EnumSetType)]
 enum Event {
@@ -29,77 +26,127 @@ enum Event {
     LoopCount,
 }
 
-struct RmtChan;
+#[derive(Debug, Clone)]
+pub struct TxChannelConfig {
+    /// Channel's clock divider
+    pub clk_divider: u8,
+    /// Set the idle output level to low/high
+    pub idle_output_level: Level,
+    /// Enable idle output
+    pub idle_output: bool,
+    /// Enable carrier modulation
+    pub carrier_modulation: bool,
+    /// Carrier high phase in ticks
+    pub carrier_high: u16,
+    /// Carrier low phase in ticks
+    pub carrier_low: u16,
+    /// Level of the carrier
+    pub carrier_level: Level,
+    /// The amount of memory blocks allocated to this channel
+    pub memsize: u8,
+}
+
+impl Default for TxChannelConfig {
+    fn default() -> Self {
+        Self {
+            clk_divider: Default::default(),
+            idle_output_level: Level::Low,
+            idle_output: Default::default(),
+            carrier_modulation: Default::default(),
+            carrier_high: Default::default(),
+            carrier_low: Default::default(),
+            carrier_level: Level::Low,
+            memsize: 1,
+        }
+    }
+}
+
+struct RmtChan(usize);
 
 #[allow(dead_code)]
 impl RmtChan {
-    const CH_IDX: usize = 0;
+    #[inline]
+    pub fn ch_idx(&self) -> usize {
+        self.0
+    }
+
+    pub fn set_divider(&self, divider: u8) {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(self.ch_idx())
+            .modify(|_, w| unsafe { w.div_cnt().bits(divider) });
+    }
 
     #[inline]
-    pub fn update() {
+    pub fn update(&self) {
         let rmt = RMT::regs();
-        rmt.ch_tx_conf0(Self::CH_IDX)
+        rmt.ch_tx_conf0(self.ch_idx())
             .modify(|_, w| w.conf_update().set_bit());
     }
 
-    pub fn set_memsize(value: u8) {
+    pub fn set_memsize(&self, value: u8) {
         let rmt = RMT::regs();
-        rmt.ch_tx_conf0(Self::CH_IDX)
+        rmt.ch_tx_conf0(self.ch_idx())
             .modify(|_, w| unsafe { w.mem_size().bits(value) });
     }
 
     #[inline]
-    pub fn clear_tx_interrupts() {
+    pub fn memsize(&self) -> u8 {
+        let rmt = RMT::regs();
+        rmt.ch_tx_conf0(self.ch_idx()).read().mem_size().bits() as u8
+    }
+
+    #[inline]
+    pub fn clear_tx_interrupts(&self) {
         let rmt = RMT::regs();
 
         rmt.int_clr().write(|w| {
-            w.ch_tx_end(Self::CH_IDX as u8).set_bit();
-            w.ch_tx_err(Self::CH_IDX as u8).set_bit();
-            w.ch_tx_loop(Self::CH_IDX as u8).set_bit();
-            w.ch_tx_thr_event(Self::CH_IDX as u8).set_bit()
+            w.ch_tx_end(self.ch_idx() as u8).set_bit();
+            w.ch_tx_err(self.ch_idx() as u8).set_bit();
+            w.ch_tx_loop(self.ch_idx() as u8).set_bit();
+            w.ch_tx_thr_event(self.ch_idx() as u8).set_bit()
         });
     }
 
     #[inline]
-    pub fn set_tx_continuous(continuous: bool) {
+    pub fn set_tx_continuous(&self, continuous: bool) {
         let rmt = RMT::regs();
 
-        rmt.ch_tx_conf0(Self::CH_IDX.into())
+        rmt.ch_tx_conf0(self.ch_idx().into())
             .modify(|_, w| w.tx_conti_mode().bit(continuous));
     }
 
     #[inline]
-    pub fn set_tx_wrap_mode(wrap: bool) {
+    pub fn set_tx_wrap_mode(&self, wrap: bool) {
         let rmt = RMT::regs();
 
-        rmt.ch_tx_conf0(Self::CH_IDX.into())
+        rmt.ch_tx_conf0(self.ch_idx().into())
             .modify(|_, w| w.mem_tx_wrap_en().bit(wrap));
     }
 
-    pub fn set_tx_carrier(carrier: bool, high: u16, low: u16, level: Level) {
+    pub fn set_tx_carrier(&self, carrier: bool, high: u16, low: u16, level: Level) {
         let rmt = RMT::regs();
 
-        rmt.chcarrier_duty(Self::CH_IDX.into())
+        rmt.chcarrier_duty(self.ch_idx().into())
             .write(|w| unsafe { w.carrier_high().bits(high).carrier_low().bits(low) });
 
-        rmt.ch_tx_conf0(Self::CH_IDX.into()).modify(|_, w| {
+        rmt.ch_tx_conf0(self.ch_idx().into()).modify(|_, w| {
             w.carrier_en().bit(carrier);
             w.carrier_eff_en().set_bit();
             w.carrier_out_lv().bit(level.into())
         });
     }
 
-    pub fn set_tx_idle_output(enable: bool, level: Level) {
+    pub fn set_tx_idle_output(&self, enable: bool, level: Level) {
         let rmt = RMT::regs();
-        rmt.ch_tx_conf0(Self::CH_IDX.into())
+        rmt.ch_tx_conf0(self.ch_idx().into())
             .modify(|_, w| w.idle_out_en().bit(enable).idle_out_lv().bit(level.into()));
     }
 
     #[inline]
-    pub fn start_tx() {
+    pub fn start_tx(&self) {
         let rmt = RMT::regs();
 
-        rmt.ch_tx_conf0(Self::CH_IDX.into()).modify(|_, w| {
+        rmt.ch_tx_conf0(self.ch_idx().into()).modify(|_, w| {
             w.mem_rd_rst().set_bit();
             w.apb_mem_rst().set_bit();
             w.tx_start().set_bit()
@@ -109,10 +156,10 @@ impl RmtChan {
     // Return the first flag that is set of, in order of decreasing priority,
     // Event::Error, Event::End, Event::LoopCount, Event::Threshold
     #[inline]
-    pub fn get_tx_status() -> Option<Event> {
+    pub fn get_tx_status(&self) -> Option<Event> {
         let rmt = RMT::regs();
         let reg = rmt.int_raw().read();
-        let ch = Self::CH_IDX as u8;
+        let ch = self.ch_idx() as u8;
 
         if reg.ch_tx_end(ch).bit() {
             Some(Event::End)
@@ -128,67 +175,63 @@ impl RmtChan {
     }
 
     #[inline]
-    pub fn reset_tx_threshold_set() {
+    pub fn reset_tx_threshold_set(&self) {
         let rmt = RMT::regs();
         rmt.int_clr()
-            .write(|w| w.ch_tx_thr_event(Self::CH_IDX as u8).set_bit());
+            .write(|w| w.ch_tx_thr_event(self.ch_idx() as u8).set_bit());
     }
 
     #[inline]
-    pub fn set_tx_threshold(threshold: u8) {
+    pub fn set_tx_threshold(&self, threshold: u8) {
         let rmt = RMT::regs();
-        rmt.ch_tx_lim(Self::CH_IDX.into())
+        rmt.ch_tx_lim(self.ch_idx().into())
             .modify(|_, w| unsafe { w.tx_lim().bits(threshold as u16) });
     }
 
     #[inline]
-    pub fn is_tx_loopcount_interrupt_set() -> bool {
+    pub fn is_tx_loopcount_interrupt_set(&self) -> bool {
         let rmt = RMT::regs();
-        rmt.int_raw().read().ch_tx_loop(Self::CH_IDX as u8).bit()
+        rmt.int_raw().read().ch_tx_loop(self.ch_idx() as u8).bit()
     }
 
-    // Returns whether stopping was immediate, or needs to wait for tx end.
-    // Due to inlining, the compiler should be able to eliminate code in the caller that
-    // depends on this.
-    //
     // Requires an update() call
     #[inline]
-    pub fn stop_tx(&self) -> bool {
+    pub fn stop_tx(&self) {
         let rmt = RMT::regs();
-        rmt.ch_tx_conf0(Self::CH_IDX.into())
+        rmt.ch_tx_conf0(self.ch_idx().into())
             .modify(|_, w| w.tx_stop().set_bit());
-        true
     }
 
     #[inline]
-    pub fn set_tx_interrupt(events: EnumSet<Event>, enable: bool) {
+    pub fn set_tx_interrupt(&self, events: EnumSet<Event>, enable: bool) {
         let rmt = RMT::regs();
         rmt.int_ena().modify(|_, w| {
             if events.contains(Event::Error) {
-                w.ch_tx_err(Self::CH_IDX as u8).bit(enable);
+                w.ch_tx_err(self.ch_idx() as u8).bit(enable);
             }
             if events.contains(Event::End) {
-                w.ch_tx_end(Self::CH_IDX as u8).bit(enable);
+                w.ch_tx_end(self.ch_idx() as u8).bit(enable);
             }
             if events.contains(Event::Threshold) {
-                w.ch_tx_thr_event(Self::CH_IDX as u8).bit(enable);
+                w.ch_tx_thr_event(self.ch_idx() as u8).bit(enable);
             }
             w
         });
     }
 
     #[inline]
-    fn listen_tx_interrupt(event: impl Into<EnumSet<Event>>) {
-        Self::set_tx_interrupt(event.into(), true);
+    fn listen_tx_interrupt(&self, event: impl Into<EnumSet<Event>>) {
+        self.set_tx_interrupt(event.into(), true);
     }
 
     #[inline]
-    fn unlisten_tx_interrupt(event: impl Into<EnumSet<Event>>) {
-        Self::set_tx_interrupt(event.into(), false);
+    fn unlisten_tx_interrupt(&self, event: impl Into<EnumSet<Event>>) {
+        self.set_tx_interrupt(event.into(), false);
     }
 }
 
-static RMT_DATA: AtomicPtr<RmtData> = AtomicPtr::new(core::ptr::null_mut());
+static RMT_DATA: [AtomicPtr<RmtData>; NUM_TX_CHANNELS] =
+    [const { AtomicPtr::new(core::ptr::null_mut()) }; NUM_TX_CHANNELS];
 
 struct RmtData {
     waker: AtomicWaker,
@@ -205,17 +248,18 @@ impl Default for RmtData {
 }
 
 struct RmtDataInner {
-    handler: fn(&mut RmtDataInner),
-    iter: NonNull<()>,
+    handler: unsafe fn(usize, &mut RmtDataInner),
+    iter: *mut (), // type erased iterator
     first_half: bool,
+    half_size: usize,
     status: EnumSet<Event>,
 }
 
 unsafe impl Send for RmtDataInner {}
 
 impl RmtData {
-    unsafe fn try_get_inst() -> Option<Arc<RmtData>> {
-        let ptr = RMT_DATA.load(Ordering::SeqCst);
+    unsafe fn try_get_inst(channel: usize) -> Option<Arc<RmtData>> {
+        let ptr = RMT_DATA[channel].load(Ordering::SeqCst);
         if ptr.is_null() {
             return None;
         }
@@ -224,8 +268,8 @@ impl RmtData {
         ManuallyDrop::new(unsafe { Weak::from_raw(ptr) }).upgrade()
     }
 
-    unsafe fn drop_weak() {
-        let ptr = RMT_DATA.swap(core::ptr::null_mut(), Ordering::SeqCst);
+    unsafe fn drop_weak(channel: usize) {
+        let ptr = RMT_DATA[channel].swap(core::ptr::null_mut(), Ordering::SeqCst);
         if !ptr.is_null() {
             unsafe {
                 Weak::from_raw(ptr);
@@ -233,7 +277,7 @@ impl RmtData {
         }
     }
 
-    fn stop() {
+    unsafe fn stop(channel: usize) {
         critical_section::with(|_| {
             // RmtChan::stop();
 
@@ -241,42 +285,72 @@ impl RmtData {
             // doesn't work (maybe a simulator problem?). Instead we fill
             // the beginning with zeros and start again, causing the transmission
             // to stop immediately.
-            let ptr = Self::calc_rmt_ram_addr(true);
+            let ptr = Self::calc_rmt_ram_addr(channel);
             for (idx, entry) in core::iter::repeat_n(0_u32, 8).enumerate() {
                 unsafe {
                     ptr.add(idx).write_volatile(entry);
                 }
             }
-            RmtChan::start_tx();
-            RmtChan::update();
+            let chan = RmtChan(channel);
+            chan.start_tx();
+            chan.update();
 
-            RmtChan::unlisten_tx_interrupt(Event::Threshold);
+            chan.unlisten_tx_interrupt(Event::Threshold);
             unsafe {
-                RmtData::drop_weak();
+                RmtData::drop_weak(channel);
             }
         });
     }
 
-    fn calc_rmt_ram_addr(first_half: bool) -> *mut u32 {
+    fn calc_rmt_ram_addr(channel: usize) -> *mut u32 {
         let ptr = RMT_RAM_START as *mut u32;
-        if first_half {
-            ptr
-        } else {
-            unsafe { ptr.add(RMT_CHANNEL_RAM_SIZE * HALF_USED_CHANNELS) }
-        }
+        unsafe { ptr.add(RMT_CHANNEL_RAM_SIZE * channel) }
     }
 
-    fn handle<T: FusedIterator<Item = u32>>(data: &mut RmtDataInner) {
-        let ptr = Self::calc_rmt_ram_addr(data.first_half);
-        let mut iter = unsafe { data.iter.cast::<T>().as_mut() }.enumerate();
+    unsafe fn handle<T: Iterator<Item = u32>>(channel: usize, data: &mut RmtDataInner) {
+        let half_size = data.half_size;
+        let first_half = data.first_half;
 
-        const COUNT: usize = RMT_CHANNEL_RAM_SIZE * HALF_USED_CHANNELS;
-        for (idx, entry) in (&mut iter).take(COUNT) {
-            unsafe {
-                ptr.add(idx).write_volatile(entry);
+        let (start_ptr, half_ptr) = unsafe {
+            let ptr = Self::calc_rmt_ram_addr(channel);
+            (ptr, ptr.add(half_size))
+        };
+        let end_ptr = unsafe { half_ptr.add(half_size) };
+        let mut ptr = if first_half { start_ptr } else { half_ptr };
+
+        let iter_ptr = data.iter.cast::<T>();
+        if let Some(iter) = unsafe { iter_ptr.as_mut() } {
+            // Fill half of the RMT RAM with data from the iterator.
+            for _ in 0..half_size {
+                let value = match iter.next() {
+                    Some(v) => v,
+                    None => {
+                        // The iterator is exhausted, mark this in the
+                        // data so that we don't try to read from it again.
+                        data.iter = core::ptr::null_mut();
+                        break;
+                    }
+                };
+
+                unsafe {
+                    ptr.write_volatile(value);
+                    ptr = ptr.add(1);
+                }
+            }
+            // Wrap back to start if we reached the end.
+            if ptr >= end_ptr {
+                ptr = start_ptr;
             }
         }
-        data.first_half = !data.first_half;
+        // Write a terminating zero. This will be overwritten on the next call
+        // to handle() if the iterator has more data. If there is no more data,
+        // the transmission will stop when this zero is reached.
+        unsafe {
+            ptr.write_volatile(0_u32);
+        }
+
+        // Toggle which half to fill next time.
+        data.first_half = !first_half;
     }
 }
 
@@ -284,116 +358,188 @@ impl RmtData {
 fn rmt_interrupt_handle() {
     let st = RMT::regs().int_st().read();
 
-    if st.ch0_tx_thr_event().bit() {
-        RMT::regs()
-            .int_clr()
-            .write(|w| w.ch0_tx_thr_event().set_bit());
+    for ch_idx in 0..(NUM_TX_CHANNELS as u8) {
+        if st.ch_tx_thr_event(ch_idx).bit() {
+            RMT::regs()
+                .int_clr()
+                .write(|w| w.ch_tx_thr_event(ch_idx).set_bit());
+            if let Some(rmt_data) = unsafe { RmtData::try_get_inst(ch_idx as usize) } {
+                // Safety: We're in an interrupt and no other interrupt accesses this data.
+                let token = unsafe { CriticalSection::new() };
+                let inner = rmt_data.inner.borrow(token).get();
 
-        let Some(rmt_data) = (unsafe { RmtData::try_get_inst() }) else {
-            return;
-        };
+                unsafe {
+                    let inner = (*inner).as_mut().unwrap_unchecked();
+                    (inner.handler)(ch_idx as usize, inner);
+                }
+            }
+        }
 
-        // Safety: We're in an interrupt and no other interrupt accesses this data.
-        let token = unsafe { CriticalSection::new() };
-        let inner = rmt_data.inner.borrow(token).get();
+        if st.ch_tx_end(ch_idx).bit() || st.ch_tx_err(ch_idx).bit() {
+            RmtChan(ch_idx as usize).clear_tx_interrupts();
+            if let Some(rmt_data) = unsafe { RmtData::try_get_inst(ch_idx as usize) } {
+                let mut events: EnumSet<Event> = EnumSet::empty();
+                if st.ch_tx_end(ch_idx).bit() {
+                    events |= Event::End;
+                }
+                if st.ch_tx_err(ch_idx).bit() {
+                    events |= Event::Error;
+                }
+                unsafe {
+                    (*rmt_data.inner.borrow(CriticalSection::new()).get())
+                        .as_mut()
+                        .unwrap_unchecked()
+                        .status |= events;
+                }
 
-        unsafe {
-            let inner = (*inner).as_mut().unwrap_unchecked();
-            (inner.handler)(inner);
+                rmt_data.waker.wake();
+                unsafe {
+                    RmtData::drop_weak(ch_idx as usize);
+                }
+            }
         }
     }
+}
 
-    if st.ch0_tx_end().bit() || st.ch0_tx_err().bit() {
-        RmtChan::clear_tx_interrupts();
-        let Some(rmt_data) = (unsafe { RmtData::try_get_inst() }) else {
-            return;
-        };
-        let mut events: EnumSet<Event> = EnumSet::empty();
-        if st.ch0_tx_end().bit() {
-            events |= Event::End;
-        }
-        if st.ch0_tx_err().bit() {
-            events |= Event::Error;
-        }
-        unsafe {
-            (*rmt_data.inner.borrow(CriticalSection::new()).get())
-                .as_mut()
-                .unwrap_unchecked()
-                .status |= events;
-        }
+pub struct Rmt<'rmt> {
+    _rmt: PhantomData<RMT<'rmt>>,
+}
 
-        rmt_data.waker.wake();
-        unsafe {
-            RmtData::drop_weak();
-        }
+impl<'rmt> Rmt<'rmt> {
+    /// Create a new RMT driver.
+    ///
+    /// - `rmt_periph`: The RMT peripheral.
+    /// - `tick_rate`: The frequency of ticks that is used as the base unit in [`esp_hal::rmt::PulseCode`].
+    pub fn new(rmt_periph: RMT<'rmt>, tick_rate: Rate) -> Self {
+        let mut rmt = rmt::Rmt::new(rmt_periph, tick_rate).unwrap();
+        rmt.set_interrupt_handler(rmt_interrupt_handle);
+
+        // TODO: Is this needed?
+        // Prevent a possible drop implementation within the esp-hal implementation from
+        // running, which could uninitialize.
+        core::mem::forget(rmt);
+        Self { _rmt: PhantomData }
+    }
+
+    /// Create a new RMT channel that can send iterators.
+    ///
+    /// - `ch_idx`: The channel index (0 or 1).
+    /// - `gpio`: The output GPIO where the waveform is output.
+    /// - `tx_cfg`: The transmission configuration.
+    pub fn channel(
+        &'_ mut self,
+        ch_idx: usize,
+        gpio: impl PeripheralOutput<'rmt>,
+        tx_cfg: TxChannelConfig,
+    ) -> IterRmtChannel<'rmt> {
+        IterRmtChannel::new(ch_idx, gpio.into(), tx_cfg)
     }
 }
 
 /// A async RMT driver that allows sending iterators.
-pub struct IterRmt<'ch> {
-    _rmt: Channel<'ch, Blocking, esp_hal::rmt::Tx>,
+pub struct IterRmtChannel<'ch> {
+    _rmt: PhantomData<Rmt<'ch>>,
+    channel: RmtChan,
     data: Arc<RmtData>,
 }
 
-impl<'rmt> IterRmt<'rmt> {
+impl<'rmt> IterRmtChannel<'rmt> {
     /// Create a new RMT that allows sending iterators.
     ///
-    /// - `rmt_periph`: The RMT peripheral.
-    /// - `tick_rate`: The frequency of ticks that is used as the base unit in [`esp_hal::rmt::PulseCode`].
+    /// - `ch_idx`: The channel index (0 or 1).
     /// - `gpio`: The output GPIO where the waveform is output.
     /// - `tx_cfg`: The transmission configuration.
-    pub fn new(
-        rmt_periph: RMT<'rmt>,
-        tick_rate: Rate,
-        gpio: impl PeripheralOutput<'rmt>,
+    fn new(
+        ch_idx: usize,
+        gpio: gpio::interconnect::OutputSignal<'rmt>,
         tx_cfg: TxChannelConfig,
-    ) -> IterRmt<'rmt> {
-        let mut rmt = Rmt::new(rmt_periph, tick_rate).unwrap();
-        rmt.set_interrupt_handler(rmt_interrupt_handle);
-        let rmt = rmt.channel0.configure_tx(gpio, tx_cfg).unwrap();
+    ) -> IterRmtChannel<'rmt> {
+        let channel = RmtChan(ch_idx);
 
-        RmtChan::set_memsize(USED_CHANNELS as u8); // Use the RAM of all four channels.
-        RmtChan::set_tx_threshold((RMT_CHANNEL_RAM_SIZE * HALF_USED_CHANNELS) as u8);
-        RmtChan::set_tx_continuous(false);
-        RmtChan::set_tx_wrap_mode(true);
-        RmtChan::update();
+        gpio.apply_output_config(&OutputConfig::default());
+        gpio.set_output_enable(true);
+
+        match ch_idx {
+            0 => gpio::OutputSignal::RMT_SIG_0,
+            1 => gpio::OutputSignal::RMT_SIG_1,
+            _ => panic!("invalid RMT channel"),
+        }
+        .connect_to(&gpio);
+        channel.set_divider(tx_cfg.clk_divider);
+        channel.set_tx_carrier(
+            tx_cfg.carrier_modulation,
+            tx_cfg.carrier_high,
+            tx_cfg.carrier_low,
+            tx_cfg.carrier_level,
+        );
+        channel.set_memsize(tx_cfg.memsize);
+        channel.set_tx_threshold(((RMT_CHANNEL_RAM_SIZE * tx_cfg.memsize as usize) / 2) as u8);
+        channel.set_tx_continuous(false);
+        channel.set_tx_wrap_mode(true);
+        channel.update();
 
         Self {
-            _rmt: rmt,
+            _rmt: PhantomData,
+            channel,
             data: Arc::default(),
         }
     }
 
     /// Transmit the given iterator asynchronously.
+    ///
+    /// - `iter`: An iterator that yields `u32` values representing RMT pulse codes.
+    /// 
+    /// Returns the iterator when transmission is complete.
+    /// 
+    /// Awaiting this function will yield until the transmission is finished.
+    /// When this future is dropped before completion, the transmission is stopped.
     pub async fn transmit<T>(&mut self, iter: T) -> Result<T::IntoIter, Error>
     where
         T: IntoIterator<Item = u32>,
         T::IntoIter: Sync + 'static,
     {
-        struct Canceller;
+        struct Canceller(u8);
         impl Drop for Canceller {
             fn drop(&mut self) {
-                RmtData::stop();
+                unsafe {
+                    RmtData::stop(self.0 as usize);
+                }
             }
         }
 
-        let canceller = Canceller;
+        let ch_idx = self.channel.ch_idx();
+        let canceller = Canceller(ch_idx as u8);
         let mut iter = iter.into_iter();
 
-        let mut iter_ext = (&mut iter).chain(core::iter::once(0u32)).fuse();
-
         let mut data_inner = RmtDataInner {
-            handler: RmtData::handle::<Fuse<Chain<&mut T::IntoIter, Once<u32>>>>,
-            iter: NonNull::from(&mut iter_ext).cast::<()>(),
+            handler: RmtData::handle::<T::IntoIter>,
+            iter: &mut iter as *mut _ as *mut (), // cast to type erased pointer
             first_half: true,
+            half_size: self.channel.memsize() as usize * RMT_CHANNEL_RAM_SIZE / 2,
             status: EnumSet::empty(),
         };
 
-        RmtChan::clear_tx_interrupts();
-        RmtChan::listen_tx_interrupt(Event::Error | Event::Threshold | Event::End);
+        self.channel.clear_tx_interrupts();
+        self.channel
+            .listen_tx_interrupt(Event::Error | Event::Threshold | Event::End);
 
-        (data_inner.handler)(&mut data_inner); // Fill first half.
-        (data_inner.handler)(&mut data_inner); // Fill second half.
+        // Prefill both halves of the RMT RAM.
+        unsafe {
+            let ptr = RmtData::calc_rmt_ram_addr(ch_idx);
+            (data_inner.handler)(ch_idx, &mut data_inner); // Fill first half.
+
+            // Since `handle()` always leaves a terminating zero at the end, filling
+            // the second half below will actually overwrite the very first value.
+            // This causes the transfer to stop immediately. To prevent this, we
+            // first read out the first element, fill the second half, and then
+            // restore the first element.
+            let first_elem = ptr.read_volatile();
+
+            (data_inner.handler)(ch_idx, &mut data_inner); // Fill second half.
+
+            // Restore first element.
+            ptr.write_volatile(first_elem);
+        }
 
         critical_section::with(|_| {
             let data = Arc::get_mut(&mut self.data)
@@ -403,16 +549,26 @@ impl<'rmt> IterRmt<'rmt> {
                 .get_mut();
             *data = Some(data_inner);
 
-            RMT_DATA.store(
+            RMT_DATA[ch_idx].store(
                 Arc::downgrade(&self.data).into_raw() as *mut _,
                 Ordering::SeqCst,
             );
         });
 
-        RmtChan::start_tx();
-        RmtChan::update();
+        self.channel.start_tx();
+        self.channel.update();
 
-        RmtWaitDone.await;
+        // Wait for transmission to finish.
+        poll_fn(move |cx| {
+            use core::task::Poll;
+            if let Some(rmt_data) = unsafe { RmtData::try_get_inst(ch_idx) } {
+                rmt_data.waker.register(cx.waker());
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
 
         // The transaction is already finished, no need to stop it anymore.
         core::mem::forget(canceller);
@@ -434,21 +590,4 @@ impl<'rmt> IterRmt<'rmt> {
 pub enum Error {
     TransmissionError,
     Stopped,
-}
-
-struct RmtWaitDone;
-impl Future for RmtWaitDone {
-    type Output = ();
-    fn poll(
-        self: core::pin::Pin<&mut Self>,
-        cx: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<Self::Output> {
-        use core::task::Poll;
-        if let Some(rmt_data) = unsafe { RmtData::try_get_inst() } {
-            rmt_data.waker.register(cx.waker());
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
-    }
 }

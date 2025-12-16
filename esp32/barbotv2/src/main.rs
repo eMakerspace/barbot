@@ -2,7 +2,6 @@
 #![no_main]
 
 use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig};
@@ -14,7 +13,6 @@ use stepper::Stepper;
 use crate::cmd::{CmdChannel, StepperCmdSignal, StopChannel};
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
 
 pub mod cmd;
 pub mod rmt;
@@ -80,18 +78,17 @@ async fn main(spawner: Spawner) {
         STOP_CHANNEL.immediate_publisher(),
     ));
 
-    let tx_cfg = esp_hal::rmt::TxChannelConfig::default()
-        .with_idle_output(true)
-        .with_idle_output_level(esp_hal::gpio::Level::Low)
-        .with_clk_divider(160); // 4 microsecond tick (40 MHz / 160)
-    let rmt = rmt::IterRmt::new(
-        peripherals.RMT,
-        Rate::from_mhz(40),
-        peripherals.GPIO20,
-        tx_cfg,
-    );
+    let tx_cfg = rmt::TxChannelConfig {
+        idle_output: true,
+        idle_output_level: esp_hal::gpio::Level::Low,
+        clk_divider: 160, // 4 microsecond tick (40 MHz / 160)
+        ..Default::default()
+    };
+    let mut rmt = rmt::Rmt::new(peripherals.RMT, Rate::from_mhz(40));
+    let stepper_channel = rmt.channel(0, peripherals.GPIO20, tx_cfg);
+
     let mut stepper = Stepper::new(
-        rmt,
+        stepper_channel,
         Rate::from_hz(40_000_000 / 160),
         peripherals.GPIO21,
         false,

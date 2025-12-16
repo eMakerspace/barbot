@@ -71,6 +71,7 @@ async fn route_end_switch_trigger(
     homing_move_target_level: &'static Mutex<Cell<Option<Level>>>,
 ) {
     loop {
+        // TODO: Debounce?
         end_switch.wait_for_any_edge().await;
         let level = end_switch.level();
         if level == Level::Low {

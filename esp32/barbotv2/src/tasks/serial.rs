@@ -35,7 +35,7 @@ pub async fn serial_reader(
         if let Some((idx, c)) = buf[total_read..total_read + count_read]
             .iter()
             .enumerate()
-            .find(|(_i, &c)| c == b'\r' || c == b'\n')
+            .find(|(_i, c)| **c == b'\r' || **c == b'\n')
         {
             if should_echo {
                 // Echo the appropriate missing character so that we echo a CRLF or LFCR,
