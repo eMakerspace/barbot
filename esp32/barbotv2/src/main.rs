@@ -20,6 +20,7 @@ pub mod stepgen;
 pub mod stepper;
 pub mod tasks;
 pub mod utils;
+pub mod ledc;
 
 extern crate alloc;
 
@@ -43,6 +44,7 @@ async fn main(spawner: Spawner) {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
