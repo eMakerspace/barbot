@@ -342,11 +342,11 @@ impl RmtData {
                 ptr = start_ptr;
             }
         }
-        // Write a terminating zero. This will be overwritten on the next call
-        // to handle() if the iterator has more data. If there is no more data,
-        // the transmission will stop when this zero is reached.
-        unsafe {
-            ptr.write_volatile(0_u32);
+        // Write a terminating zero if the iterator is exhausted.
+        if data.iter.is_null() {
+            unsafe {
+                ptr.write_volatile(0_u32);
+            }
         }
 
         // Toggle which half to fill next time.
@@ -465,6 +465,8 @@ impl<'rmt> IterRmtChannel<'rmt> {
             _ => panic!("invalid RMT channel"),
         }
         .connect_to(&gpio);
+        
+        channel.update();
         channel.set_divider(tx_cfg.clk_divider);
         channel.set_tx_carrier(
             tx_cfg.carrier_modulation,
@@ -473,6 +475,7 @@ impl<'rmt> IterRmtChannel<'rmt> {
             tx_cfg.carrier_level,
         );
         channel.set_memsize(tx_cfg.memsize);
+        channel.set_tx_idle_output(tx_cfg.idle_output, tx_cfg.idle_output_level);
         channel.set_tx_threshold(((RMT_CHANNEL_RAM_SIZE * tx_cfg.memsize as usize) / 2) as u8);
         channel.set_tx_continuous(false);
         channel.set_tx_wrap_mode(true);
@@ -525,20 +528,8 @@ impl<'rmt> IterRmtChannel<'rmt> {
 
         // Prefill both halves of the RMT RAM.
         unsafe {
-            let ptr = RmtData::calc_rmt_ram_addr(ch_idx);
             (data_inner.handler)(ch_idx, &mut data_inner); // Fill first half.
-
-            // Since `handle()` always leaves a terminating zero at the end, filling
-            // the second half below will actually overwrite the very first value.
-            // This causes the transfer to stop immediately. To prevent this, we
-            // first read out the first element, fill the second half, and then
-            // restore the first element.
-            let first_elem = ptr.read_volatile();
-
             (data_inner.handler)(ch_idx, &mut data_inner); // Fill second half.
-
-            // Restore first element.
-            ptr.write_volatile(first_elem);
         }
 
         critical_section::with(|_| {

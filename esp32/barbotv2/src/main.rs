@@ -25,17 +25,18 @@ extern crate alloc;
 
 // Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
 const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(800.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(1000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
+    .with_acceleration(1000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    .with_max_speed(2000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
 
 const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(800.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(100.0 * 8.0); // 0.1 turns / seccond (in simulation, 200 steps / turn)
+    .with_acceleration(8000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
+    .with_max_speed(300.0 * 8.0); // 0.1 turns / seccond (in simulation, 200 steps / turn)
 
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static PUMP_CMD_SIG: crate::cmd::PumpCmdSignal = crate::cmd::PumpCmdSignal::new();
+static LIFT_MOTOR_CMD_SIG: crate::cmd::LiftMotorCmdSignal = crate::cmd::LiftMotorCmdSignal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -78,11 +79,14 @@ async fn main(spawner: Spawner) {
         emergency_stop,
         STOP_CHANNEL.immediate_publisher(),
     ));
+    
+    info!("APB clock running at {} Hz\r", esp_hal::clock::Clocks::get().apb_clock.as_hz());
 
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
         idle_output_level: esp_hal::gpio::Level::Low,
-        clk_divider: 160, // 4 microsecond tick (40 MHz / 160)
+        clk_divider: 80, // 2 microsecond tick (40 MHz / 80)
+        memsize: 1,
         ..Default::default()
     };
     let mut rmt = rmt::Rmt::new(peripherals.RMT, Rate::from_mhz(40));
@@ -90,7 +94,7 @@ async fn main(spawner: Spawner) {
 
     let mut stepper = Stepper::new(
         stepper_channel,
-        Rate::from_hz(40_000_000 / 160),
+        Rate::from_hz(40_000_000 / 80),
         peripherals.GPIO21,
         false,
     );
@@ -116,6 +120,7 @@ async fn main(spawner: Spawner) {
         stepper_sig: &STEPPER_CMD_SIG,
         pump_sig: &PUMP_CMD_SIG,
         stop_sub: STOP_CHANNEL.subscriber().unwrap(),
+        lift_motor_sig: &LIFT_MOTOR_CMD_SIG,
     }));
 
     let pump_pin_cfg = gpio::OutputConfig::default().with_drive_mode(gpio::DriveMode::PushPull);
@@ -129,6 +134,15 @@ async fn main(spawner: Spawner) {
             Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
         ],
     ));
+    
+    spawner.must_spawn(
+        tasks::lift_motor::lift_motor(
+            &LIFT_MOTOR_CMD_SIG,
+            STOP_CHANNEL.subscriber().unwrap(),
+            Output::new(peripherals.GPIO10, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO8, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
+        )
+    );
 
     info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));
 }

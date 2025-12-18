@@ -5,7 +5,7 @@ use futures::{FutureExt, select_biased};
 use crate::cmd::{PumpCmdSignal, StopCmd, StopCmdSub};
 use crate::utils::invert_level;
 
-const ACTIVE_LEVEL: Level = Level::High;
+const ACTIVE_LEVEL: Level = Level::Low;
 pub const INACTIVE_LEVEL: Level = invert_level(ACTIVE_LEVEL);
 
 pub const PUMP_COUNT: usize = 4;

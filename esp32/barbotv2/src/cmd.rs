@@ -39,10 +39,18 @@ pub struct PumpCmd {
 pub type PumpCmdSignal = BiSignal<PumpCmd>;
 
 #[derive(Debug)]
+pub struct LiftMotorCmd {
+    pub direction_up: bool,
+    pub duration_ms: u32,
+}
+pub type LiftMotorCmdSignal = BiSignal<LiftMotorCmd>;
+
+#[derive(Debug)]
 pub enum Cmd {
     Stepper(StepperCmd),
     Pump(PumpCmd),
     Led(),
-    LiftMotor(),
+    LiftMotor(LiftMotorCmd),
+    Wait(u32),
 }
 pub type CmdChannel = Channel<CriticalSectionRawMutex, Cmd, 128>;

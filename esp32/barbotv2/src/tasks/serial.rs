@@ -115,6 +115,34 @@ async fn handle_cmd(
                     return;
                 }
             }
+            // `G1.0 Z{time_ms}` to move the lift motor down for `{time_ms}` milliseconds.
+            // `G1.1 Z{time_ms}` to move the lift motor up for `{time_ms}` milliseconds.
+            1 => {
+                let Some(time_ms) = gcmd.value_for('Z') else {
+                    invalid_cmd_msg("missing Z<time_ms> parameter");
+                    return;
+                };
+                let Some(time_ms) = time_ms.round().to_u32() else {
+                    invalid_cmd_msg("Z parameter out of range");
+                    return;
+                };
+
+                let is_up = match gcmd.minor_number() {
+                    0 => false,
+                    1 => true,
+                    _ => {
+                        invalid_cmd_msg("minor number must be 0 (down) or 1 (up)");
+                        return;
+                    }
+                };
+
+                cmd_chan
+                    .send(Cmd::LiftMotor(crate::cmd::LiftMotorCmd {
+                        direction_up: is_up,
+                        duration_ms: time_ms,
+                    }))
+                    .await;
+            }
             // `G2 N{pump_index} T{time_ms}` Activate pump number {pump_index} for {time_ms} milliseconds.
             // `G2.1 N{pump_index} T{time_ms}` Same as G2, but blocks until the command is complete.
             2 => {
@@ -170,6 +198,22 @@ async fn handle_cmd(
             // `M10` Toggle local echo.
             10 => {
                 *should_echo = !*should_echo;
+            }
+            // `M`
+            _ => invalid_cmd(),
+        },
+        gcode::Mnemonic::ToolChange => match gcmd.major_number() {
+            // `T0 D{time_ms}` Wait for {time_ms} milliseconds.
+            0 => {
+                let Some(time_ms) = gcmd.value_for('D') else {
+                    invalid_cmd_msg("missing D<time_ms> parameter");
+                    return;
+                };
+                let Some(time_ms) = time_ms.round().to_u32() else {
+                    invalid_cmd_msg("D parameter out of range");
+                    return;
+                };
+                cmd_chan.send(Cmd::Wait(time_ms)).await;
             }
             _ => invalid_cmd(),
         },

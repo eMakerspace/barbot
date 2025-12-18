@@ -1,3 +1,4 @@
+use embassy_time::Timer;
 use futures::{FutureExt, select_biased};
 
 use crate::cmd::{Cmd, CmdChannel, PumpCmdSignal, StepperCmdSignal, StopCmdSub};
@@ -7,6 +8,7 @@ pub struct HandleCmd {
     pub stepper_sig: &'static StepperCmdSignal,
     pub pump_sig: &'static PumpCmdSignal,
     pub stop_sub: StopCmdSub,
+    pub lift_motor_sig: &'static crate::cmd::LiftMotorCmdSignal,
 }
 
 #[embassy_executor::task]
@@ -16,6 +18,7 @@ pub async fn route_cmd(handle_cmd: HandleCmd) {
         stepper_sig,
         pump_sig,
         mut stop_sub,
+        lift_motor_sig,
     } = handle_cmd;
 
     let mut stopped = false;
@@ -52,8 +55,11 @@ pub async fn route_cmd(handle_cmd: HandleCmd) {
             Cmd::Led() => {
                 // TODO
             }
-            Cmd::LiftMotor() => {
-                // TODO
+            Cmd::LiftMotor(lift_cmd) => {
+                lift_motor_sig.send(lift_cmd).await;
+            }
+            Cmd::Wait(time_ms) => {
+                Timer::after_millis(time_ms as u64).await;
             }
         }
     }

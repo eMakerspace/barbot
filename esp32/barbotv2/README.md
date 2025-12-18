@@ -60,16 +60,22 @@ and should determine the right chip if it is connected with USB.
 - [X] Project setup, receiving commands, wokwi
 - [X] Control stepper motor
 - [X] Control pumps
-- [ ] Control lift motor
+- [X] Control lift motor
 - [ ] Control LEDs
 - [X] Stepper motor homing (with end-switch on `GPIO7`)
     - [X] Reacting to emergency stop (stops the stepper motor immediately).
 - [X] G-code parsing, commands
     - [X] `G0 X{position}` for moving the stepper motor to step `{position}`.
-    - [X] `G2 I{pump} D{time_ms}` activate pump for duration `{time_ms}` milliseconds.
-    - [X] `G2.1 I{pump} D{time_ms}` activate pump for `{time_ms}` milliseconds and wait.
+    - [ ] `G0.1 X{range_fact}` for moving the stepper motor to `range_fact * end_step`
+          (where `end_step` is maximum step after homing).
+    - [X] `G1.0 Z{time_ms}` to move the lift motor down for `{time_ms}` milliseconds.
+    - [X] `G1.1 Z{time_ms}` to move the lift motor up for `{time_ms}` milliseconds.
+    - [X] `G2 I{pump} D{time_ms}` activate pump with index `{pump}` for duration `{time_ms}` milliseconds.
+    - [X] `G2.1 I{pump} D{time_ms}` activate pump with index `{pump}` for `{time_ms}` milliseconds and wait
+          for deactivation.
     - [X] `G28` to start homing.
-    - [X] `M0` to stop the stepper motor slowly.
-    - [X] `M0.1` to stop the stepper motor immediately (without deccelerating).
-    - [X] `M1` recorvers from stop command.
+    - [X] `T0 D{time_ms}` to wait for `{time_ms}` milliseconds.
+    - [X] `M0` to stop the current command gracefully (and continue).
+    - [X] `M0.1` to stop the current command immediately (emergency stop) and remain stopped until a `M1` command.
+    - [X] `M1` recorvers from emergency stop.
     - [X] `M10` to toggle serial echo.
