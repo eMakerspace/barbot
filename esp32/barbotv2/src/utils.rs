@@ -3,11 +3,11 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 pub mod bi_signal {
     use core::cell::Cell;
     use core::fmt::Debug;
-    use core::future::{poll_fn, Future};
+    use core::future::{Future, poll_fn};
     use core::task::{Context, Poll};
 
-    use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
     use embassy_sync::blocking_mutex::Mutex;
+    use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
 
     #[derive(Debug)]
     enum State<T> {
@@ -217,7 +217,10 @@ pub mod bi_signal {
                     }
                     State::SenderWaiting { sender_waker } => {
                         // We called receive before comitting the previously received
-                        // value (thus the sender is still waiting), so just wait again.
+                        // value (thus the sender is still waiting). Wait forever.
+                        //
+                        // This is useful if the receiver is selecting on multiple
+                        // futures, and so actually wont wait forever.
                         cell.set(State::SenderWaiting { sender_waker });
                         Poll::Pending
                     }

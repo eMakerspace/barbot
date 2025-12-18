@@ -22,8 +22,10 @@ impl HomingState {
         end_switch_sig: &'static Signal<()>,
         emergency_stop_sig: &'static Signal<()>,
     ) {
-        if end_switch_sig.signaled() {
+        end_switch_sig.reset();
+        if END_SWITCH_ACTIVE.load(Ordering::SeqCst) {
             log::error!("Homing failed: end switch already active\r");
+            return;
         }
         stepper.set_curr_pos(0);
         let mut res =

@@ -41,6 +41,10 @@ pub async fn pump_task(
                 _ = stop_cmd_sub.next_message_pure().fuse() => {
                     continue;
                 },
+                // Note: So that we dont wait forever here, `to_block` must be None.
+                // This is gauranteed since if `to_block` is Some, there is at least one
+                // active pump with a scheduled expiration, and thus `next_instant` would
+                // not be None.
                 cmd = cmd_sig.receive().fuse() => cmd,
             };
 
@@ -51,6 +55,8 @@ pub async fn pump_task(
             gpios[idx].set_level(ACTIVE_LEVEL);
 
             if cmd.wait {
+                // Keeping `cmd` alive causes the command queue to block on us.
+                // We need to make sure that `cmd` is dropped when the pump is turned off.
                 to_block = Some((cmd, idx, inst))
             } else {
                 expirations[idx] = Some(inst);
