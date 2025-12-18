@@ -118,27 +118,7 @@ impl<'p> LedcChannel<'p> {
     fn new(timer: TimerNum, cfg: TimerConfig) -> Self {
         let ledc = LEDC::regs();
 
-        // Configure timer
-        ledc.timer(timer.0 as usize)
-            .conf()
-            .write(|w| unsafe {
-                w.div_num().bits(cfg.divider as u32);
-                w.timer_sel().bits(0); // Use timer 0
-                w.tick_sel().set_bit(); // Use high speed clock
-                w.loops().bits(0); // No looping
-                w.para_up().set_bit()
-            });
-
-        // Configure duty cycle
-        ledc.timer(timer.0 as usize)
-            .low_speed_conf()
-            .write(|w| unsafe {
-                w.low_to_high_point()
-                    .bits(cfg.low_to_high_value as u32);
-                w.high_to_low_point()
-                    .bits(cfg.high_to_low_value as u32);
-                w.para_up().set_bit()
-            });
+        // TODO
 
         LedcChannel {
             _ledc: PhantomData,
