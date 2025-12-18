@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use embassy_executor::Spawner;
 use esp_hal::gpio::{Input, Level};
 use futures::{FutureExt, select_biased};
+use num_traits::Float;
 
 use crate::cmd::{StepperCmd, StepperCmdSignal, StopCmd, StopCmdSub};
 use crate::stepper::{self, Dir, Stepper};
@@ -186,20 +187,20 @@ pub async fn stepper_task(
     loop {
         let cmd = stepper_cmd_sig.receive().await;
         let pos = match cmd.value {
-            StepperCmd::GoTo(pos) => {
-                if !homing_state.homing_needed {
-                    pos
-                } else {
-                    log::warn!("Ignoring command, homing required\r");
-                    continue;
-                }
-            }
             StepperCmd::Home() => {
                 homing_state
                     .home_stepper(&mut stepper, &END_SWITCH_SIGNAL, &EMERGENCY_STOP_SIGNAL)
                     .await;
                 continue;
             }
+            _ if homing_state.homing_needed => {
+                log::warn!("Ignoring command, homing required\r");
+                continue;
+            }
+            StepperCmd::GoTo(pos) => pos,
+            StepperCmd::GoToRangeFact(fact) => ((homing_state.end_pos as f32 * fact).round() as i32)
+                .min(homing_state.end_pos)
+                .max(0),
         };
 
         assert!(

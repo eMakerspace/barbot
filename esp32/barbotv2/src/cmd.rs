@@ -26,6 +26,7 @@ pub type StopCmdImmediatePub =
 #[derive(Debug)]
 pub enum StepperCmd {
     GoTo(i32),
+    GoToRangeFact(f32),
     Home(),
 }
 pub type StepperCmdSignal = BiSignal<StepperCmd>;

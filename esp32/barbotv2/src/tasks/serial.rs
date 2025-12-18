@@ -101,6 +101,20 @@ async fn handle_cmd(
 
     match gcmd.mnemonic() {
         gcode::Mnemonic::General => match gcmd.major_number() {
+            // `G0.1 X{range_fact}` for moving the stepper motor to `range_fact * end_step`.
+            0 if gcmd.minor_number() == 1 => {
+                let Some(range_fact) = gcmd.value_for('X') else {
+                    invalid_cmd_msg("missing X parameter");
+                    return;
+                };
+                if range_fact < 0.0 || range_fact > 1.0 {
+                    invalid_cmd_msg("X parameter out of range");
+                    return;
+                }
+                cmd_chan
+                    .send(Cmd::Stepper(StepperCmd::GoToRangeFact(range_fact)))
+                    .await;
+            }
             // `G0 X{position}` Move stepper motor to step {position}.
             0 => {
                 if let Some(loc) = gcmd.value_for('X') {

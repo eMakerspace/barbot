@@ -66,8 +66,9 @@ and should determine the right chip if it is connected with USB.
     - [X] Reacting to emergency stop (stops the stepper motor immediately).
 - [X] G-code parsing, commands
     - [X] `G0 X{position}` for moving the stepper motor to step `{position}`.
-    - [ ] `G0.1 X{range_fact}` for moving the stepper motor to `range_fact * end_step`
-          (where `end_step` is maximum step after homing).
+    - [X] `G0.1 X{range_fact}` for moving the stepper motor to `range_fact * end_step`
+          (where `end_step` is maximum step after homing). This allows specifying
+          fractional positions within the homed range (`0` is the start, `1` is the end).
     - [X] `G1.0 Z{time_ms}` to move the lift motor down for `{time_ms}` milliseconds.
     - [X] `G1.1 Z{time_ms}` to move the lift motor up for `{time_ms}` milliseconds.
     - [X] `G2 I{pump} D{time_ms}` activate pump with index `{pump}` for duration `{time_ms}` milliseconds.
