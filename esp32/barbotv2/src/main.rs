@@ -10,7 +10,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use stepper::Stepper;
 
-use crate::cmd::{CmdChannel, StepperCmdSignal, StopChannel};
+use crate::cmd::{CmdChannel, LiftMotorCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -35,8 +35,8 @@ const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpee
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
-static PUMP_CMD_SIG: crate::cmd::PumpCmdSignal = crate::cmd::PumpCmdSignal::new();
-static LIFT_MOTOR_CMD_SIG: crate::cmd::LiftMotorCmdSignal = crate::cmd::LiftMotorCmdSignal::new();
+static PUMP_CMD_SIG: PumpCmdSignal = PumpCmdSignal::new();
+static LIFT_MOTOR_CMD_SIG: LiftMotorCmdSignal = LiftMotorCmdSignal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -80,8 +80,6 @@ async fn main(spawner: Spawner) {
         STOP_CHANNEL.immediate_publisher(),
     ));
     
-    info!("APB clock running at {} Hz\r", esp_hal::clock::Clocks::get().apb_clock.as_hz());
-
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
         idle_output_level: esp_hal::gpio::Level::Low,
