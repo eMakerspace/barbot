@@ -37,6 +37,37 @@ def save_json(data: dict, path: Path):
         json.dump(data, f, indent=4)
 
 
+def init_missing_configs():
+    """Create missing config files with defaults if they don't exist."""
+    # Create config.json with all slots but empty
+    if not CONFIG_PATH.exists():
+        config_data = {
+            "poll_interval_seconds": 5,
+            "slot_mapping": {slot: "" for slot in ALL_SLOTS}
+        }
+        save_json(config_data, CONFIG_PATH)
+
+    # Create store_config.json empty (will be populated from API)
+    if not STORE_CONFIG_PATH.exists():
+        store_data = {
+            "last_fetched": None,
+            "available_spirits": [],
+            "available_mixers": [],
+            "products": []
+        }
+        save_json(store_data, STORE_CONFIG_PATH)
+
+    # Create attributes_config.json empty (will be populated from API)
+    if not ATTRIBUTES_CONFIG_PATH.exists():
+        attributes_data = {
+            "attribute_ids": {},
+            "attribute_slugs": {},
+            "term_slugs": {},
+            "bottle_properties": {}
+        }
+        save_json(attributes_data, ATTRIBUTES_CONFIG_PATH)
+
+
 class BarbotConfig:
     """Hardware configuration: slot mapping and runtime slot state."""
 

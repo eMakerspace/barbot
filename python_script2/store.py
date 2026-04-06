@@ -121,9 +121,7 @@ class StoreConfig:
         term_slugs: {attr_slug: {display_name: slug}} for converting option
         display names to slugs. Fetch attributes first to populate this.
         """
-        print("\n[FETCH] Fetching products...")
         products_raw = woo.fetch_all("products")
-        print(f"  [FETCH] Got {len(products_raw)} product(s).")
 
         term_slugs = term_slugs or {}
         spirits: set[str] = set()
@@ -171,7 +169,3 @@ class StoreConfig:
             "products": products,
         }
         self.save()
-
-        print(f"  [FETCH] Spirits:  {self.available_spirits}")
-        print(f"  [FETCH] Mixers:   {self.available_mixers}")
-        print(f"  [FETCH] Saved to store_config.json ({len(products)} products).")
