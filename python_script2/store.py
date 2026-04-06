@@ -27,13 +27,6 @@ class StoreConfig:
     def last_fetched(self) -> str | None:
         return self._data.get("last_fetched")
 
-    @property
-    def attribute_slugs(self) -> dict[str, str]:
-        return self._data.get("attribute_slugs", {})
-
-    @property
-    def term_slugs(self) -> dict[str, dict[str, str]]:
-        return self._data.get("term_slugs", {})
 
     @property
     def available_spirits(self) -> list[str]:
@@ -52,8 +45,9 @@ class StoreConfig:
 
     # -- Attribute slug helpers ----------------------------------------------
 
-    def attr_slug(self, display_name: str) -> str:
-        return self.attribute_slugs.get(display_name, display_name.lower())
+    @staticmethod
+    def attr_slug(display_name: str, attribute_slugs: dict[str, str]) -> str:
+        return attribute_slugs.get(display_name, display_name.lower())
 
     @staticmethod
     def parse_cl_to_ml(val) -> float:
@@ -65,12 +59,12 @@ class StoreConfig:
 
     # -- Derived data --------------------------------------------------------
 
-    def get_preset_recipes(self) -> dict:
+    def get_preset_recipes(self, attribute_slugs: dict[str, str]) -> dict:
         """Build {KEY: {ingredients, product_id}} from simple products."""
-        spirits_slug = self.attr_slug("Spirits")
-        mixers_slug = self.attr_slug("Mixers")
-        spirits_amt_slug = self.attr_slug("Spirits Amount")
-        mixers_amt_slug = self.attr_slug("Mixers Amount")
+        spirits_slug = self.attr_slug("Spirits", attribute_slugs)
+        mixers_slug = self.attr_slug("Mixers", attribute_slugs)
+        spirits_amt_slug = self.attr_slug("Spirits Amount", attribute_slugs)
+        mixers_amt_slug = self.attr_slug("Mixers Amount", attribute_slugs)
 
         recipes = {}
         for prod in self.products:
@@ -98,10 +92,10 @@ class StoreConfig:
                 recipes[key] = {"ingredients": ingredients, "product_id": prod["id"]}
         return recipes
 
-    def get_diy_volumes(self) -> dict:
+    def get_diy_volumes(self, attribute_slugs: dict[str, str]) -> dict:
         """Extract default Spirit/Mixer volumes (ml) from the first variable product."""
-        spirits_amt_slug = self.attr_slug("Spirits Amount")
-        mixers_amt_slug = self.attr_slug("Mixers Amount")
+        spirits_amt_slug = self.attr_slug("Spirits Amount", attribute_slugs)
+        mixers_amt_slug = self.attr_slug("Mixers Amount", attribute_slugs)
 
         for prod in self.products:
             if prod.get("type") != "variable":
@@ -121,29 +115,25 @@ class StoreConfig:
 
     # -- Fetch from WooCommerce ----------------------------------------------
 
-    def fetch(self, woo: WooClient):
-        """Pull all products and attribute terms from WooCommerce, rebuild cache."""
-        print("\n[FETCH] Fetching product attributes and terms ...")
-        attr_slug_by_name, term_slugs = self._fetch_attribute_terms(woo)
-        print(f"  [FETCH] Got {len(attr_slug_by_name)} attribute(s): {list(attr_slug_by_name.keys())}")
+    def fetch(self, woo: WooClient, term_slugs: dict | None = None):
+        """Fetch all products from WooCommerce and rebuild cache.
 
-        print("[FETCH] Fetching products ...")
+        term_slugs: {attr_slug: {display_name: slug}} for converting option
+        display names to slugs. Fetch attributes first to populate this.
+        """
+        print("\n[FETCH] Fetching products...")
         products_raw = woo.fetch_all("products")
         print(f"  [FETCH] Got {len(products_raw)} product(s).")
 
+        term_slugs = term_slugs or {}
         spirits: set[str] = set()
         mixers: set[str] = set()
         products = []
 
-        spirits_key = attr_slug_by_name.get("Spirits", "spirits")
-        mixers_key = attr_slug_by_name.get("Mixers", "mixers")
-
         for prod in products_raw:
             attrs_out = []
             for attr in prod.get("attributes", []):
-                a_name = attr.get("name", "")
-                a_slug = attr_slug_by_name.get(a_name, a_name)
-                terms_map = term_slugs.get(a_slug, {})
+                a_slug = attr.get("slug", attr.get("name", ""))
 
                 if attr.get("options"):
                     raw_values = attr["options"]
@@ -152,12 +142,15 @@ class StoreConfig:
                 else:
                     raw_values = []
 
-                value_slugs = [terms_map.get(v, v) for v in raw_values]
+                # Convert display names to slugs
+                slug_map = term_slugs.get(a_slug, {})
+                value_slugs = [slug_map.get(v, v) for v in raw_values]
+
                 attrs_out.append({"name": a_slug, "value": value_slugs})
 
-                if a_slug == spirits_key:
+                if a_slug == "pa_spirits":
                     spirits.update(value_slugs)
-                elif a_slug == mixers_key:
+                elif a_slug == "pa_mixers":
                     mixers.update(value_slugs)
 
             products.append({
@@ -173,8 +166,6 @@ class StoreConfig:
 
         self._data = {
             "last_fetched": datetime.now(timezone.utc).isoformat(),
-            "attribute_slugs": attr_slug_by_name,
-            "term_slugs": term_slugs,
             "available_spirits": sorted(spirits),
             "available_mixers": sorted(mixers),
             "products": products,
@@ -184,18 +175,3 @@ class StoreConfig:
         print(f"  [FETCH] Spirits:  {self.available_spirits}")
         print(f"  [FETCH] Mixers:   {self.available_mixers}")
         print(f"  [FETCH] Saved to store_config.json ({len(products)} products).")
-
-    @staticmethod
-    def _fetch_attribute_terms(woo: WooClient) -> tuple[dict, dict]:
-        attr_slug_by_name: dict[str, str] = {}
-        term_slugs: dict[str, dict[str, str]] = {}
-
-        attributes = woo.fetch_all("products/attributes")
-        for attr in attributes:
-            a_name = attr["name"]
-            a_slug = attr["slug"]
-            attr_slug_by_name[a_name] = a_slug
-            terms = woo.fetch_all(f"products/attributes/{attr['id']}/terms")
-            term_slugs[a_slug] = {t["name"]: t["slug"] for t in terms}
-
-        return attr_slug_by_name, term_slugs

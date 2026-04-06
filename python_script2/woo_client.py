@@ -84,3 +84,20 @@ class WooClient:
             requests.post(url, data={"secret": token}, timeout=5)
         except Exception as e:
             print(f"  [HEARTBEAT] Failed: {e}")
+
+    def update_term_viscosity(self, attribute_id: int, term_id: int, viscosity: float) -> bool:
+        """Update the viscosity property of a specific attribute term."""
+        endpoint = f"products/attributes/{attribute_id}/terms/{term_id}"
+        payload = {"viscosity": viscosity}
+
+        try:
+            response = self._api.put(endpoint, payload)
+            if response.status_code in [200, 201]:
+                print(f"  [API] Successfully updated Term {term_id} viscosity to {viscosity}.")
+                return True
+            else:
+                print(f"  [API] Failed to update Term {term_id} (HTTP {response.status_code})")
+                return False
+        except Exception as e:
+            print(f"  [API] Error updating term {term_id}: {e}")
+            return False

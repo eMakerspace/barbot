@@ -6,6 +6,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
 STORE_CONFIG_PATH = BASE_DIR / "store_config.json"
+ATTRIBUTES_CONFIG_PATH = BASE_DIR / "attributes_config.json"
 ENV_PATH = BASE_DIR / ".env"
 
 SPIRIT_SLOTS = [f"Slot_{i}" for i in range(1, 9)]
@@ -89,3 +90,53 @@ class BarbotConfig:
     @staticmethod
     def is_valid_slot(slot: str) -> bool:
         return slot in ALL_SLOTS
+
+
+class AttributesConfig:
+    """Cached WooCommerce attributes with bottle properties."""
+
+    def __init__(self, data: dict, path: Path = ATTRIBUTES_CONFIG_PATH):
+        self._path = path
+        self._data = data
+
+    @classmethod
+    def load(cls, path: Path = ATTRIBUTES_CONFIG_PATH) -> "AttributesConfig":
+        try:
+            return cls(load_json(path), path)
+        except FileNotFoundError:
+            return cls({}, path)
+
+    def save(self):
+        save_json(self._data, self._path)
+
+    # -- Properties ----------------------------------------------------------
+
+    @property
+    def attribute_ids(self) -> dict[str, int]:
+        """Map attribute slug to attribute ID."""
+        return self._data.get("attribute_ids", {})
+
+    @property
+    def attribute_slugs(self) -> dict[str, str]:
+        """Map display name to attribute slug."""
+        return self._data.get("attribute_slugs", {})
+
+    @property
+    def term_slugs(self) -> dict[str, dict[str, str]]:
+        """Map {attr_slug: {term_name: term_slug}}."""
+        return self._data.get("term_slugs", {})
+
+    @property
+    def bottle_properties(self) -> dict[str, dict[str, dict]]:
+        """Map {attr_slug: {term_slug: {id, name, bottle_size, viscosity}}}."""
+        return self._data.get("bottle_properties", {})
+
+    # -- Setters ----------------------------------------------------------
+
+    def update_attributes(self, attribute_ids: dict, attribute_slugs: dict,
+                         term_slugs: dict, bottle_properties: dict):
+        """Update all attribute-related data."""
+        self._data["attribute_ids"] = attribute_ids
+        self._data["attribute_slugs"] = attribute_slugs
+        self._data["term_slugs"] = term_slugs
+        self._data["bottle_properties"] = bottle_properties

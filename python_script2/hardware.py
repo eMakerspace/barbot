@@ -11,6 +11,12 @@ class HardwareInterface:
     def __init__(self, config: BarbotConfig):
         self.config = config
 
+    def homing(self):
+        """Initialize hardware and home all axes (dummy implementation)."""
+        print("  [HARDWARE] Running homing sequence...")
+        time.sleep(0.5)
+        print("  [HARDWARE] Homing complete!")
+
     def dispense(self, slot: str, ml: float):
         ingredient = self.config.slot_ingredient(slot) or "???"
         print(f"  [HARDWARE] Dispensing {ml:.0f} ml from {slot} ({ingredient})")

@@ -1,6 +1,6 @@
 """Inventory management: push full stock state and per-ingredient sync."""
 
-from config import BarbotConfig
+from config import BarbotConfig, AttributesConfig
 from store import StoreConfig
 from woo_client import WooClient
 
@@ -8,9 +8,10 @@ from woo_client import WooClient
 class InventoryManager:
     """Manages WooCommerce stock status based on physical slot state."""
 
-    def __init__(self, config: BarbotConfig, store: StoreConfig, woo: WooClient):
+    def __init__(self, config: BarbotConfig, store: StoreConfig, attributes: AttributesConfig, woo: WooClient):
         self.config = config
         self.store = store
+        self.attributes = attributes
         self.woo = woo
 
     # -- Public API ----------------------------------------------------------
@@ -18,8 +19,9 @@ class InventoryManager:
     def push_all(self):
         """Full sync: set every product/variation in/out of stock based on mounted slots."""
         mounted = self.config.mounted_ingredients()
-        spirits_slug = self.store.attr_slug("Spirits")
-        mixers_slug = self.store.attr_slug("Mixers")
+        attr_slugs = self.attributes.attribute_slugs
+        spirits_slug = self.store.attr_slug("Spirits", attr_slugs)
+        mixers_slug = self.store.attr_slug("Mixers", attr_slugs)
 
         print(f"\n[PUSH] Mounted ingredients: {sorted(mounted)}")
         print("[PUSH] Fetching products from WooCommerce ...")
@@ -53,7 +55,7 @@ class InventoryManager:
         print(f"\n[INVENTORY] {action} products containing '{ingredient}' ...")
 
         products = self.woo.fetch_all("products")
-        recipes = self.store.get_preset_recipes()
+        recipes = self.store.get_preset_recipes(self.attributes.attribute_slugs)
         product_updates: list[dict] = []
         variation_updates: dict[int, list[dict]] = {}
 
@@ -122,16 +124,21 @@ class InventoryManager:
         self, product_id: int, spirits_slug: str, mixers_slug: str,
         mounted: set[str]
     ) -> list[dict]:
-        """Build stock updates for all variations of a variable product."""
+        """Build stock updates for all variations of a variable product.
+
+        WooCommerce returns variation attribute options as display names,
+        so we convert them to slugs before comparing against mounted (slugs).
+        """
         updates = []
         variations = self.woo.fetch_all(f"products/{product_id}/variations")
         for var in variations:
             needed = set()
             for a in var.get("attributes", []):
-                slug = a.get("slug", a.get("name", ""))
+                attr_slug = a.get("slug", a.get("name", ""))
                 option = a.get("option", "")
-                if slug in (spirits_slug, mixers_slug) and option:
-                    term_map = self.store.term_slugs.get(slug, {})
+                if attr_slug in (spirits_slug, mixers_slug) and option:
+                    # Convert display name -> slug for comparison
+                    term_map = self.attributes.term_slugs.get(attr_slug, {})
                     needed.add(term_map.get(option, option))
             if not needed:
                 continue

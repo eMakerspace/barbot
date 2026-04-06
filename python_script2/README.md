@@ -1,6 +1,27 @@
 # Barbot - Automated Bartender WooCommerce Integration
 
-A Python control script for a physical drink-mixing machine integrated with a WooCommerce storefront. The machine polls for paid orders, dispenses drinks via hardware pumps, and keeps the online store in sync with physical inventory.
+
+Anleitung schreiben!!
+
+Neuer Drink im onlineshop:
+
+1. Bild generieren
+2. Anderen Drink duplizieren
+3. Bild, Text, Titel ersetzen
+4. Inhalt ersetzen (attribute)
+5. Preis setzen
+6. Auf "Out of Stock" setzen
+7. Veröffentlichen
+
+Neues Attribut (Spirituose, Mixer) hinzufügen:
+1. Unter Attribut -> Mixer -> add term (screenshot!)
+2. Properties der Flasche (Bottle size, Viscosity)
+3. Unter DIY Drink: Neue Attribute hinzufügen
+4. Unter DIY Drink: Neue Variationen hinzufügen
+5. Unter DIY Drink: Preise setzen für alle Variationen
+
+Wenn es mehr als 200 Variationen gibt: Snippet anpassen.
+<!-- A Python control script for a physical drink-mixing machine integrated with a WooCommerce storefront. The machine polls for paid orders, dispenses drinks via hardware pumps, and keeps the online store in sync with physical inventory.
 
 ## Architecture
 
@@ -277,4 +298,4 @@ Add a method to `Console` and register it in the `handler` dict inside `run()`.
 
 ### Custom Order Logic
 
-Override `OrderProcessor.parse_line_item()` or `process_order()` for special handling.
+Override `OrderProcessor.parse_line_item()` or `process_order()` for special handling. -->
