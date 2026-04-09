@@ -18,7 +18,6 @@ import threading
 import time
 
 import RPi.GPIO as GPIO
-from RPLCD.i2c import CharLCD
 
 from config import BarbotConfig, AttributesConfig, SPIRIT_SLOTS, MIXER_SLOTS, ALL_SLOTS
 from store import StoreConfig
@@ -26,16 +25,14 @@ from woo_client import WooClient
 from hardware import HardwareInterface, X_MOVE_MIN, X_MOVE_MAX
 from inventory import InventoryManager
 from orders import OrderProcessor
+from hal_lcd import LcdDisplay, COLS, ROWS
+from hal_encoder import RotaryEncoder
 
-# ── Hardware constants ────────────────────────────────────────
-LCD_ADDR = 0x3F
-I2C_BUS  = 1
+# ── GPIO pin assignments ──────────────────────────────────────
 GPIO_CLK = 27   # BCM (BOARD 13)
 GPIO_DT  = 17   # BCM (BOARD 11)
 GPIO_SW  = 22   # BCM (BOARD 15)
-GPIOCHIP = 0
-COLS     = 20
-ROWS     = 4
+
 VISIBLE  = 3    # item rows; row 0 is always the header
 
 SPINNER  = ('|', '/', '-', '\\')
@@ -71,18 +68,16 @@ class LCDMenu:
         self.inventory  = inventory
         self.orders     = orders
 
-        self._lcd = CharLCD(
-            i2c_expander='PCF8574', address=LCD_ADDR, port=I2C_BUS,
-            cols=COLS, rows=ROWS, dotsize=8, charmap='A02',
-            auto_linebreaks=False, backlight_enabled=True,
+        self._lcd     = LcdDisplay()
+        self._encoder = RotaryEncoder(
+            GPIO_CLK, GPIO_DT, GPIO_SW,
+            on_rotate=self._on_rotate,
+            on_press=self._on_press,
         )
-        # Row cache: avoid redundant I2C writes (prevents flicker)
-        self._row_cache = [''] * ROWS
 
         self._lock      = threading.Lock()
         self._alive     = True
         self._dirty     = True
-        self._btn_time  = 0.0
         self._spin_idx  = 0
 
         # ── Navigation stack ─────────────────────────────────
@@ -155,14 +150,9 @@ class LCDMenu:
 
     def run(self):
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(GPIO_CLK, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(GPIO_DT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(GPIO_SW, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
         self._lcd.clear()
-
-        enc = threading.Thread(target=self._enc_thread, daemon=True)
-        enc.start()
+        self._encoder.start()
 
         # Startup sequence (blocking)
         self._begin_work('Homing...', self._do_homing)
@@ -170,7 +160,7 @@ class LCDMenu:
 
         self._normalize_slots()
 
-        self._begin_work('Fetching store...', self._do_fetch)
+        self._begin_work('Fetching...', self._do_fetch)
         self._wait_work()
 
         # Main menu
@@ -183,7 +173,6 @@ class LCDMenu:
         except KeyboardInterrupt:
             pass
         except Exception as e:
-            # Clean up LCD on any crash
             try:
                 self._lcd.clear()
                 self._write_row(0, 'Error!')
@@ -192,11 +181,12 @@ class LCDMenu:
             except Exception:
                 pass
         finally:
+            self._encoder.stop()
             self._lcd.clear()
             self._write_row(1, '      Goodbye!      ')
             time.sleep(1.0)
             self._lcd.clear()
-            self._lcd.backlight_enabled = False
+            self._lcd.backlight = False
             GPIO.cleanup()
 
     # ══════════════════════════════════════════════════════════
@@ -204,12 +194,7 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
 
     def _write_row(self, r: int, text: str):
-        """Write exactly COLS chars to row r. Skips write if unchanged."""
-        formatted = f'{text:<{COLS}}'[:COLS]
-        if formatted != self._row_cache[r]:
-            self._row_cache[r] = formatted
-            self._lcd.cursor_pos = (r, 0)
-            self._lcd.write_string(formatted)
+        self._lcd.write_row(r, text)
 
     @staticmethod
     def _hdr(title: str, up: bool = False, dn: bool = False) -> str:
@@ -308,32 +293,7 @@ class LCDMenu:
         return label[self._marq_offset: self._marq_offset + width]
 
     # ══════════════════════════════════════════════════════════
-    # Encoder thread (2 kHz polling, same pattern as rotarytest)
-    # ══════════════════════════════════════════════════════════
-
-    def _enc_thread(self):
-        last_clk = GPIO.input(GPIO_CLK)
-        last_sw  = GPIO.input(GPIO_SW)
-        while self._alive:
-            clk = GPIO.input(GPIO_CLK)
-            dt  = GPIO.input(GPIO_DT)
-            sw  = GPIO.input(GPIO_SW)
-
-            if last_clk == 1 and clk == 0:
-                self._on_rotate(1 if dt == 1 else -1)
-
-            if last_sw == 1 and sw == 0:
-                now = time.time()
-                if now - self._btn_time > 0.3:   # 300 ms debounce
-                    self._btn_time = now
-                    self._on_press()
-
-            last_clk = clk
-            last_sw  = sw
-            time.sleep(0.0005)   # 2 kHz
-
-    # ══════════════════════════════════════════════════════════
-    # Input handlers
+    # Input handlers  (called from RotaryEncoder HAL thread)
     # ══════════════════════════════════════════════════════════
 
     def _on_rotate(self, d: int):
@@ -343,7 +303,7 @@ class LCDMenu:
             if m == 'run':
                 # Any rotation wakes the backlight for 5 seconds
                 self._run_backlight_until = time.time() + 5.0
-                self._lcd.backlight_enabled = True
+                self._lcd.backlight = True
 
             elif m == 'visc_edit':
                 self._vedit_val = round(self._vedit_val + d * 0.1, 1)
@@ -451,7 +411,7 @@ class LCDMenu:
 
             elif m == 'run':
                 # Light up backlight for the confirm dialog
-                self._lcd.backlight_enabled = True
+                self._lcd.backlight = True
                 action = lambda: self._show_confirm(
                     'Stop Polling',
                     'Stop polling?',
@@ -667,7 +627,7 @@ class LCDMenu:
             bl_until = self._run_backlight_until
         # Backlight timeout: turn off once 5 s after last rotation has elapsed
         if time.time() >= bl_until:
-            self._lcd.backlight_enabled = False
+            self._lcd.backlight = False
         self._spin_idx = (self._spin_idx + 1) % len(SPINNER)
         spin = SPINNER[self._spin_idx]
         last_str = f'#{last_id}' if last_id else 'none'
@@ -738,24 +698,16 @@ class LCDMenu:
                 tid  = term.get('id')
                 tnam = term.get('name')
                 tslg = term.get('slug')
-                tprp = term.get('bottle_properties', {})
                 if not all((tid, tnam, tslg)):
                     continue
                 term_slugs[aslg][tnam] = tslg
-                # Prefer locally saved viscosity over WooCommerce value; WC may
-                # return 1 (default) if the custom field was never written there.
-                local_visc = (
-                    self.attributes.bottle_properties
-                    .get(aslg, {})
-                    .get(tslg, {})
-                    .get('viscosity')
-                )
+
+                bp = term.get('bottle_properties', {})
                 bottle_props[aslg][tslg] = {
                     'id':          tid,
                     'name':        tnam,
-                    'bottle_size': tprp.get('bottle_size'),
-                    'viscosity':   local_visc if local_visc is not None
-                                   else tprp.get('viscosity', 1),
+                    'bottle_size': float(bp.get('bottle_size', 70)),
+                    'viscosity':   float(bp.get('viscosity',   1)),
                 }
 
         self.attributes.update_attributes(attr_ids, attr_slugs, term_slugs, bottle_props)
@@ -1169,7 +1121,7 @@ class LCDMenu:
             self._mode        = 'run'
             self._dirty       = True
         # Turn off backlight during run mode
-        self._lcd.backlight_enabled = False
+        self._lcd.backlight = False
 
         def _poll():
             while not stop.is_set():
@@ -1199,7 +1151,7 @@ class LCDMenu:
                 self._run_stop.set()
             self._mode  = 'menu'
             self._dirty = True
-        self._lcd.backlight_enabled = True
+        self._lcd.backlight = True
 
     # ── Quit ───────────────────────────────────────────────────
 

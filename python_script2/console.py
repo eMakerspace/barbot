@@ -183,18 +183,18 @@ class Console:
                 term_id = term.get("id")
                 term_name = term.get("name")
                 term_slug = term.get("slug")
-                term_bottle_props = term.get("bottle_properties", {})
 
                 if not term_id or not term_name or not term_slug:
                     continue
 
                 term_slugs[attr_slug][term_name] = term_slug
 
+                bp = term.get('bottle_properties', {})
                 bottle_properties[attr_slug][term_slug] = {
                     "id": term_id,
                     "name": term_name,
-                    "bottle_size": term_bottle_props.get("bottle_size"),
-                    "viscosity": term_bottle_props.get("viscosity", 1),
+                    "bottle_size": float(bp.get('bottle_size', 70)),
+                    "viscosity":   float(bp.get('viscosity',   1)),
                 }
 
         # Save attributes config
