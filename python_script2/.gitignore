@@ -3,6 +3,4 @@ __pycache__/
 *.pyc
 .env
 
-config.json
-store_config.json
-attributes_config.json
+config/

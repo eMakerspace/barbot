@@ -1,4 +1,4 @@
-"""HAL – 20×4 I²C LCD (HD44780 via PCF8574 backpack).
+""" 20×4 I²C LCD (HD44780 via PCF8574 backpack).
 
 Wraps RPLCD.i2c.CharLCD with:
   - a row-level write cache that suppresses redundant I²C writes
@@ -19,7 +19,7 @@ ROWS     = 4
 
 
 class LcdDisplay:
-    """Thin HAL for the 20×4 I²C character LCD.
+    """Thin wrapper for the 20×4 I²C character LCD.
 
     Usage
     -----
@@ -37,7 +37,7 @@ class LcdDisplay:
             cols=COLS,
             rows=ROWS,
             dotsize=8,
-            charmap='A02',
+            charmap='A00',
             auto_linebreaks=False,
             backlight_enabled=True,
         )

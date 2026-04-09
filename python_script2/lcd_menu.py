@@ -25,8 +25,8 @@ from woo_client import WooClient
 from hardware import HardwareInterface, X_MOVE_MIN, X_MOVE_MAX
 from inventory import InventoryManager
 from orders import OrderProcessor
-from hal_lcd import LcdDisplay, COLS, ROWS
-from hal_encoder import RotaryEncoder
+from lcd import LcdDisplay, COLS, ROWS
+from encoder import RotaryEncoder
 
 # ── GPIO pin assignments ──────────────────────────────────────
 GPIO_CLK = 27   # BCM (BOARD 13)
@@ -36,7 +36,7 @@ GPIO_SW  = 22   # BCM (BOARD 15)
 VISIBLE  = 3    # item rows; row 0 is always the header
 
 SPINNER  = ('|', '/', '-', '\\')
-ARROW    = '\x7e'   # → glyph in HD44780 ROM A02
+ARROW    = '>'      # selection indicator (works in all charmaps)
 
 # ── Layout constants ──────────────────────────────────────────
 # Each menu row: SEL(1) SP(1) LABEL(16) HINT(2) = 20

@@ -1,4 +1,4 @@
-"""HAL – Rotary encoder with push button.
+"""Rotary encoder with push button.
 
 Uses a quadrature state machine so that one mechanical detent always
 produces exactly one rotation event, regardless of contact bounce or

@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = BASE_DIR / "config.json"
-STORE_CONFIG_PATH = BASE_DIR / "store_config.json"
-ATTRIBUTES_CONFIG_PATH = BASE_DIR / "attributes_config.json"
+CONFIG_DIR = BASE_DIR / "config"
+CONFIG_PATH = BASE_DIR / CONFIG_DIR / "slots_config.json"
+STORE_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "store_config.json"
+ATTRIBUTES_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "attributes_config.json"
 ENV_PATH = BASE_DIR / ".env"
 
 SPIRIT_SLOTS = [f"Slot_{i}" for i in range(1, 9)]
@@ -39,6 +40,9 @@ def save_json(data: dict, path: Path):
 
 def init_missing_configs():
     """Create missing config files with defaults if they don't exist."""
+
+    if not CONFIG_DIR.exists():
+        CONFIG_DIR.mkdir()
     # Create config.json with all slots but empty
     if not CONFIG_PATH.exists():
         config_data = {
