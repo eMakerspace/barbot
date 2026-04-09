@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Barbot – Automated Bartender WooCommerce Integration."""
 
-from config import BarbotConfig, AttributesConfig, load_env, init_missing_configs
+from config import BarbotConfig, AttributesConfig, HardwareConfig, load_env, init_missing_configs
 from store import StoreConfig
 from woo_client import WooClient
 from hardware import HardwareInterface
@@ -15,10 +15,11 @@ def main():
         init_missing_configs()
         env = load_env()
         config = BarbotConfig.load()
+        hw_config = HardwareConfig.load()
         store = StoreConfig.load()
         attributes = AttributesConfig.load()
         woo = WooClient(env)
-        hardware = HardwareInterface(config)
+        hardware = HardwareInterface(config, hw_config)
         inventory = InventoryManager(config, store, attributes, woo)
         orders = OrderProcessor(config, store, attributes, woo, hardware)
         ui = LCDMenu(config, store, attributes, woo, hardware, inventory, orders)

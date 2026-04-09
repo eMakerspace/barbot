@@ -5,9 +5,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
-CONFIG_PATH = BASE_DIR / CONFIG_DIR / "slots_config.json"
+SLOTS_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "slots_config.json"
 STORE_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "store_config.json"
 ATTRIBUTES_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "attributes_config.json"
+HARDWARE_CONFIG_PATH = BASE_DIR / CONFIG_DIR / "hardware_config.json"
 ENV_PATH = BASE_DIR / ".env"
 
 SPIRIT_SLOTS = [f"Slot_{i}" for i in range(1, 9)]
@@ -44,12 +45,13 @@ def init_missing_configs():
     if not CONFIG_DIR.exists():
         CONFIG_DIR.mkdir()
     # Create config.json with all slots but empty
-    if not CONFIG_PATH.exists():
+    if not SLOTS_CONFIG_PATH.exists():
         config_data = {
             "poll_interval_seconds": 5,
-            "slot_mapping": {slot: "" for slot in ALL_SLOTS}
+            "slot_mapping": {slot: "" for slot in ALL_SLOTS},
+            "spirit_measures_cl": "2"
         }
-        save_json(config_data, CONFIG_PATH)
+        save_json(config_data, SLOTS_CONFIG_PATH)
 
     # Create store_config.json empty (will be populated from API)
     if not STORE_CONFIG_PATH.exists():
@@ -71,11 +73,18 @@ def init_missing_configs():
         }
         save_json(attributes_data, ATTRIBUTES_CONFIG_PATH)
 
+    # hardware_config.json must exist (user-defined machine geometry)
+    if not HARDWARE_CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"hardware_config.json not found at {HARDWARE_CONFIG_PATH}. "
+            "Please create it with slot positions and sensor settings."
+        )
+
 
 class BarbotConfig:
     """Hardware configuration: slot mapping and runtime slot state."""
 
-    def __init__(self, data: dict, path: Path = CONFIG_PATH):
+    def __init__(self, data: dict, path: Path = SLOTS_CONFIG_PATH):
         self._path = path
         self.poll_interval: int = data.get("poll_interval_seconds", 5)
         self.slot_mapping: dict[str, str] = dict(data.get("slot_mapping", {}))
@@ -83,7 +92,7 @@ class BarbotConfig:
         self._rebuild_lookup()
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> "BarbotConfig":
+    def load(cls, path: Path = SLOTS_CONFIG_PATH) -> "BarbotConfig":
         return cls(load_json(path), path)
 
     def save(self):
@@ -175,3 +184,28 @@ class AttributesConfig:
         self._data["attribute_slugs"] = attribute_slugs
         self._data["term_slugs"] = term_slugs
         self._data["bottle_properties"] = bottle_properties
+
+
+class HardwareConfig:
+    """Machine geometry and hardware parameters loaded from hardware_config.json."""
+
+    def __init__(self, data: dict, path: Path = HARDWARE_CONFIG_PATH):
+        self._path = path
+        x = data.get("x_axis", {})
+        self.x_max: int = x.get("max_steps", 6000)
+        self.x_idle: int = x.get("idle_position", 3000)
+        self.steps_per_mm: float = x.get("steps_per_mm", 10)
+
+        self.slot_positions: dict[str, int] = data.get("slot_positions", {})
+
+        optic = data.get("spirit_optic", {})
+        self.pour_duration_ms: int = optic.get("pour_duration_ms", 1500)
+        self.settle_duration_ms: int = optic.get("settle_duration_ms", 500)
+
+
+    @classmethod
+    def load(cls, path: Path = HARDWARE_CONFIG_PATH) -> "HardwareConfig":
+        return cls(load_json(path), path)
+
+    def position_for_slot(self, slot: str) -> int | None:
+        return self.slot_positions.get(slot)

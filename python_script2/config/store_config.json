@@ -1,0 +1,469 @@
+{
+    "last_fetched": "2026-04-09T21:54:18.905472+00:00",
+    "available_spirits": [
+        "gin",
+        "jaegermeister",
+        "malibu",
+        "rum",
+        "tequila",
+        "trojka-green",
+        "trojka-red",
+        "vodka",
+        "whisky"
+    ],
+    "available_mixers": [
+        "ananassaft",
+        "bitter-lemon",
+        "citro",
+        "cola",
+        "ice-tea",
+        "orangensaft",
+        "tonic-water"
+    ],
+    "products": [
+        {
+            "id": 536,
+            "name": "Pina Colada",
+            "slug": "pina-colada",
+            "sku": "DRINK-514",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "outofstock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "malibu"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "ananassaft"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 513,
+            "name": "Vodka Lemon",
+            "slug": "vodka-lemon",
+            "sku": "DRINK-513",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "vodka"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "bitter-lemon"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 500,
+            "name": "Poison Potion",
+            "slug": "poison-potion",
+            "sku": "DRINK-500",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "trojka-green"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "orangensaft"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 499,
+            "name": "Green Lemon",
+            "slug": "green-lemon",
+            "sku": "DRINK-499",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "trojka-green"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "bitter-lemon"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 498,
+            "name": "Red Fusion",
+            "slug": "red-fusion",
+            "sku": "DRINK-498",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "trojka-red"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "orangensaft"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 497,
+            "name": "Long Island Ice Tea",
+            "slug": "long-island-ice-tea",
+            "sku": "DRINK-497",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "gin",
+                        "rum",
+                        "tequila",
+                        "vodka"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "cola"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "2"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "17"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 453,
+            "name": "Gin Tonic",
+            "slug": "gin-tonic",
+            "sku": "DRINK-453",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "gin"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "tonic-water"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 410,
+            "name": "DIY Drink",
+            "slug": "diy-drink-variable",
+            "sku": "DRINK-410",
+            "type": "variable",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "gin",
+                        "jaegermeister",
+                        "malibu",
+                        "rum",
+                        "tequila",
+                        "trojka-green",
+                        "trojka-red",
+                        "vodka",
+                        "whisky"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "ananassaft",
+                        "bitter-lemon",
+                        "citro",
+                        "cola",
+                        "ice-tea",
+                        "orangensaft",
+                        "tonic-water"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 24,
+            "name": "Cuba Libre",
+            "slug": "cupa-libre",
+            "sku": "DRINK-24",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "rum"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "cola"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 23,
+            "name": "Screwdriver",
+            "slug": "vodka-o",
+            "sku": "DRINK-23",
+            "type": "simple",
+            "status": "publish",
+            "stock_status": "instock",
+            "attributes": [
+                {
+                    "name": "pa_spirits",
+                    "value": [
+                        "vodka"
+                    ]
+                },
+                {
+                    "name": "pa_mixers",
+                    "value": [
+                        "orangensaft"
+                    ]
+                },
+                {
+                    "name": "pa_spirits-amount",
+                    "value": [
+                        "4"
+                    ]
+                },
+                {
+                    "name": "pa_mixers-amount",
+                    "value": [
+                        "21"
+                    ]
+                },
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 13,
+            "name": "DIY Drink",
+            "slug": "diy-drink",
+            "sku": "DRINK-13",
+            "type": "simple",
+            "status": "private",
+            "stock_status": "outofstock",
+            "attributes": [
+                {
+                    "name": "pa_depot-inklusiv",
+                    "value": [
+                        "ja"
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -22,7 +22,7 @@ import RPi.GPIO as GPIO
 from config import BarbotConfig, AttributesConfig, SPIRIT_SLOTS, MIXER_SLOTS, ALL_SLOTS
 from store import StoreConfig
 from woo_client import WooClient
-from hardware import HardwareInterface, X_MOVE_MIN, X_MOVE_MAX
+from hardware import HardwareInterface
 from inventory import InventoryManager
 from orders import OrderProcessor
 from lcd import LcdDisplay, COLS, ROWS
@@ -317,8 +317,8 @@ class LCDMenu:
                 # Two speeds: slow rotation = 1, fast rotation = 100
                 step = 100 if dt < 0.01 else 1
                 self._xmove_step = step
-                self._xmove_val  = max(X_MOVE_MIN,
-                                   min(X_MOVE_MAX, self._xmove_val + d * step))
+                self._xmove_val  = max(0,
+                                   min(self.hw.hw.x_max, self._xmove_val + d * step))
                 self._dirty = True
 
             elif m == 'num_entry':
