@@ -137,6 +137,11 @@ class LCDMenu:
         self._run_last_id          = None
         self._run_backlight_until  = 0.0   # epoch time; backlight on while now < this
 
+        # mixing state (shown during active drink dispensing)
+        self._mix_drink_num  = 0
+        self._mix_total      = 0
+        self._mix_name       = ''
+
         # marquee (ping-pong scroll for selected row)
         self._marq_label  = ''
         self._marq_offset = 0
@@ -493,16 +498,17 @@ class LCDMenu:
             dirty = self._dirty
             # 'working', 'run', and 'menu' always redraw
             # (menu needs it for marquee; row cache prevents redundant I2C writes)
-            if mode not in ('working', 'run', 'menu') and not dirty:
+            if mode not in ('working', 'run', 'mixing', 'menu') and not dirty:
                 return
             self._dirty = False
 
-        if   mode == 'menu':    self._draw_menu()
-        elif mode == 'info':    self._draw_info()
+        if   mode == 'menu':      self._draw_menu()
+        elif mode == 'info':      self._draw_info()
         elif mode == 'working':   self._draw_working()
         elif mode == 'confirm':   self._draw_confirm()
         elif mode == 'run':       self._draw_run()
-        elif mode == 'visc_edit':  self._draw_visc_edit()
+        elif mode == 'mixing':    self._draw_mixing()
+        elif mode == 'visc_edit': self._draw_visc_edit()
         elif mode == 'x_move':    self._draw_x_move()
         elif mode == 'num_entry': self._draw_num_entry()
 
@@ -635,6 +641,41 @@ class LCDMenu:
         self._write_row(1, f' Orders done: {count:<6}')
         self._write_row(2, f' Last: {last_str:<13}')
         self._write_row(3, '  [Press to stop]   ')
+
+    def _draw_mixing(self):
+        with self._lock:
+            num   = self._mix_drink_num
+            total = self._mix_total
+            name  = self._mix_name
+        self._spin_idx = (self._spin_idx + 1) % len(SPINNER)
+        spin = SPINNER[self._spin_idx]
+        progress = f'{num}/{total}'
+        vis = self._marq_tick(name, 17)
+        self._write_row(0, self._hdr(f'Mixing {progress}'))
+        self._write_row(1, f' {spin} {vis}')
+        self._write_row(2, '                    ')
+        self._write_row(3, '                    ')
+
+    # ── Public hooks for order processor ─────────────────────────
+
+    def show_mixing(self, drink_num: int, total: int, name: str):
+        """Called by OrderProcessor before dispensing each drink."""
+        with self._lock:
+            self._mix_drink_num = drink_num
+            self._mix_total     = total
+            self._mix_name      = name
+            self._mode          = 'mixing'
+            self._dirty         = True
+        self._marq_reset()
+        self._lcd.backlight = True
+
+    def clear_mixing(self):
+        """Called by OrderProcessor after all drinks in an order are done."""
+        with self._lock:
+            self._mode  = 'run'
+            self._dirty = True
+        # Restore run-mode backlight behaviour (off until rotated)
+        self._lcd.backlight = False
 
     # ══════════════════════════════════════════════════════════
     # Startup tasks
@@ -1131,7 +1172,7 @@ class LCDMenu:
                     pass
                 try:
                     pending = self.woo.fetch_all('orders', {'status': 'processing'})
-                    for order in pending:
+                    for order in sorted(pending, key=lambda o: o['id']):
                         if stop.is_set():
                             break
                         self.orders.process_order(order)

@@ -23,6 +23,7 @@ def main():
         inventory = InventoryManager(config, store, attributes, woo)
         orders = OrderProcessor(config, store, attributes, woo, hardware)
         ui = LCDMenu(config, store, attributes, woo, hardware, inventory, orders)
+        orders.ui = ui
         ui.run()
     except Exception as e:
         # If anything crashes during initialization, the LCD/GPIO cleanup in
