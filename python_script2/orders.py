@@ -1,5 +1,6 @@
 """Order polling, parsing, and processing."""
 
+import threading
 import time
 
 from config import BarbotConfig, AttributesConfig
@@ -8,6 +9,8 @@ from woo_client import WooClient
 from hardware import HardwareInterface
 from mixer import DrinkResolver
 from progress import OrderProgress
+
+HEARTBEAT_INTERVAL = 15  # seconds between heartbeats during mixing
 
 
 class OrderProcessor:
@@ -30,6 +33,22 @@ class OrderProcessor:
         self.ui = ui
         self.resolver = DrinkResolver(config, store, attributes)
         self.progress = OrderProgress()
+        self._heartbeat_stop = threading.Event()
+
+    def _heartbeat_thread(self):
+        """Send heartbeats at a fixed interval until _heartbeat_stop is set."""
+        while not self._heartbeat_stop.wait(HEARTBEAT_INTERVAL):
+            self.woo.send_heartbeat()
+
+    def _start_heartbeat(self):
+        self._heartbeat_stop.clear()
+        t = threading.Thread(target=self._heartbeat_thread, daemon=True)
+        t.start()
+        return t
+
+    def _stop_heartbeat(self, thread: threading.Thread):
+        self._heartbeat_stop.set()
+        thread.join(timeout=HEARTBEAT_INTERVAL + 5)
 
     def process_order(self, order: dict):
         """Parse all line items, make each drink, then mark order completed."""
@@ -52,17 +71,22 @@ class OrderProcessor:
 
         self.hw.display_order_id(short_id)
 
-        for drink_num, spec in enumerate(all_specs, start=1):
-            if drink_num <= skip:
-                print(f"[ORDER #{order_id}] Skipping drink {drink_num}/{total} (already made)")
-                continue
+        # Keep sending heartbeats while mixing so the website doesn't lock up
+        hb_thread = self._start_heartbeat()
+        try:
+            for drink_num, spec in enumerate(all_specs, start=1):
+                if drink_num <= skip:
+                    print(f"[ORDER #{order_id}] Skipping drink {drink_num}/{total} (already made)")
+                    continue
 
-            print(f"[ORDER #{order_id}] Making drink {drink_num}/{total}:")
-            spec.log()
-            if self.ui:
-                self.ui.show_mixing(drink_num, total, spec.name)
-            self.hw.make_drink(spec)
-            self.progress.drink_done()
+                print(f"[ORDER #{order_id}] Making drink {drink_num}/{total}:")
+                spec.log()
+                if self.ui:
+                    self.ui.show_mixing(drink_num, total, spec.name)
+                self.hw.make_drink(spec)
+                self.progress.drink_done()
+        finally:
+            self._stop_heartbeat(hb_thread)
 
         if self.ui:
             self.ui.clear_mixing()

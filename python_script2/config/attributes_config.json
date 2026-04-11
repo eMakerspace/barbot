@@ -146,7 +146,7 @@
                 "id": 23,
                 "name": "Gin",
                 "bottle_size": 70.0,
-                "viscosity": 2.2
+                "viscosity": 1.0
             },
             "jaegermeister": {
                 "id": 27,
@@ -170,7 +170,7 @@
                 "id": 24,
                 "name": "Tequila",
                 "bottle_size": 70.0,
-                "viscosity": 1.1
+                "viscosity": 1.0
             },
             "trojka-green": {
                 "id": 26,
