@@ -49,10 +49,14 @@ pub async fn route_cmd(handle_cmd: HandleCmd) {
 
         match cmd {
             Cmd::Stepper(stepper_cmd) => {
+                let is_move = !matches!(stepper_cmd, crate::cmd::StepperCmd::Home());
                 // Always home the servo to 180° before any cart movement to avoid collisions.
                 servo_sig.send(crate::cmd::ServoCmd { angle: 180 }).await;
                 Timer::after_millis(500).await;
                 stepper_sig.send(stepper_cmd).await;
+                if is_move {
+                    log::info!("Move done\r");
+                }
             }
             Cmd::Pump(pump_cmd) => {
                 pump_sig.send(pump_cmd).await;

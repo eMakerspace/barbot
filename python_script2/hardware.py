@@ -250,9 +250,12 @@ class HardwareInterface:
         print(f"[HW] Move X: {self.x_position} → {position} ({distance} steps)")
         if self._esp:
             self._queue_move(position)
-            self._sync()
+            try:
+                self._esp.wait_for(["Move done"], timeout=30.0)
+            except TimeoutError:
+                print("[HW] WARNING: move timed out")
         else:
-            travel_s = distance / self.hw.x_max
+            travel_s = distance / max(self.hw.x_max, 1)
             time.sleep(travel_s * 0.5 + 0.05)
             self.x_position = position
 
