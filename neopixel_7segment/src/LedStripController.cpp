@@ -40,6 +40,10 @@ static constexpr int NUM_U = sizeof(U_PHASES) / sizeof(U_PHASES[0]);
 // Public API
 // ============================================================================
 
+void LedStripController::setBrightness(uint8_t brightness) {
+    FastLED.setBrightness(brightness);
+}
+
 void LedStripController::begin() {
     FastLED.addLeds<WS2812, cfg::LED_PIN, GRB>(leds_, cfg::LED_COUNT);
     FastLED.setBrightness(200);

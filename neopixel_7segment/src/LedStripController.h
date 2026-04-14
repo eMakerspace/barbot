@@ -33,6 +33,7 @@ public:
     // -----------------------------------------------------------------------
     void setIdle();
     void setOff();
+    void setBrightness(uint8_t brightness);
 
 private:
     enum class Mode : uint8_t { Idle, Off };

@@ -51,11 +51,12 @@ void setup() {
 
     Serial.println("7-segment display ready.");
     Serial.println("Commands:");
-    Serial.println("  <number>   - display 0-99 (static)");
-    Serial.println("  -bl <num>  - blink number");
-    Serial.println("  -br <num>  - breathing effect");
-    Serial.println("  -i         - idle animations (~6 min 45 s cycle)");
-    Serial.println("  -c         - falling cup animation");
+    Serial.println("  <number>      - display 0-99 (static)");
+    Serial.println("  -bl <num>     - blink number");
+    Serial.println("  -br <num>     - breathing effect");
+    Serial.println("  -i            - idle animations (~6 min 45 s cycle)");
+    Serial.println("  -c            - falling cup animation");
+    Serial.println("  -bri <0-255>  - set LED strip brightness");
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +91,13 @@ void loop() {
                 Serial.println("Cup animation...");
                 controller.setCup();
                 break;
+            case CommandType::Brightness:
+                Serial.print("Brightness: ");
+                Serial.println(cmd.value);
+                ledStrip.setBrightness(cmd.value);
+                break;
             case CommandType::Invalid:
-                Serial.println("Invalid command");
+                Serial.println("ERR: unknown command. Try: <num>, -bl <num>, -br <num>, -i, -c, -bri <0-255>");
                 break;
         }
     }

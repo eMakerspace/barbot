@@ -14,7 +14,7 @@ bool SerialParser::tryParse(Command &cmd) {
     if (line.isEmpty()) return false;
 
     cmd = parseCommand(line.c_str());
-    return (cmd.type != CommandType::Invalid);
+    return true;  // always return true so the caller can handle Invalid (e.g. print an error)
 }
 
 Command SerialParser::parseCommand(const char *line) {
@@ -49,6 +49,13 @@ Command SerialParser::parseCommand(const char *line) {
     if (strcmp(line, "-c") == 0) {
         cmd.type = CommandType::Cup;
         cmd.value = 0;
+        return cmd;
+    }
+
+    if (strncmp(line, "-bri", 4) == 0) {
+        cmd.type = CommandType::Brightness;
+        int val = atoi(line + 4);
+        cmd.value = (val >= 0 && val <= 255) ? (uint8_t)val : 200;
         return cmd;
     }
 

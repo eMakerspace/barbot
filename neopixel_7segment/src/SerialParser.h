@@ -9,6 +9,7 @@ enum class CommandType : uint8_t {
     Breathe,     // breathing number: "-br 82"
     Animate,     // fancy animations: "-i"
     Cup,         // falling cup animation: "-c"
+    Brightness,  // set LED strip brightness: "-bri 128"
     Invalid      // unrecognized command
 };
 
