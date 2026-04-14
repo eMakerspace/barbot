@@ -146,7 +146,7 @@ async fn main(spawner: Spawner) {
     // HX711 scale: DATA on GPIO8, CLK on GPIO10
     let scale_data = Input::new(
         peripherals.GPIO8,
-        InputConfig::default().with_pull(esp_hal::gpio::Pull::None),
+        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
     let scale_clk = Output::new(
         peripherals.GPIO10,
