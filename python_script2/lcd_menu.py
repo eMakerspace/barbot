@@ -88,7 +88,7 @@ class LCDMenu:
         self._nav:   list = []     # parallel [cursor, scroll] per stack entry
 
         # ── Mode ─────────────────────────────────────────────
-        # 'menu' | 'info' | 'working' | 'confirm' | 'run' | 'visc_edit' | 'x_move' | 'num_entry'
+        # 'menu' | 'info' | 'working' | 'confirm' | 'run' | 'visc_edit' | 'x_move' | 'num_entry' | 'teach'
         self._mode = 'menu'
 
         # visc_edit state
@@ -100,6 +100,12 @@ class LCDMenu:
         self._xmove_val    = 0       # current target position
         self._xmove_step   = 1       # last computed acceleration step
         self._xmove_last_t = 0.0     # timestamp of last rotation event
+
+        # teach state
+        self._teach_slot   = ''      # slot being taught
+        self._teach_val    = 0       # jogged target step position
+        self._teach_step   = 1
+        self._teach_last_t = 0.0
 
         # num_entry state (generic integer input screen)
         self._nentry_title    = ''
@@ -326,6 +332,16 @@ class LCDMenu:
                                    min(self.hw.hw.x_max, self._xmove_val + d * step))
                 self._dirty = True
 
+            elif m == 'teach':
+                now = time.time()
+                dt  = now - self._teach_last_t
+                self._teach_last_t = now
+                step = 100 if dt < 0.01 else 1
+                self._teach_step = step
+                self._teach_val  = max(0,
+                                   min(self.hw.hw.x_max, self._teach_val + d * step))
+                self._dirty = True
+
             elif m == 'num_entry':
                 now = time.time()
                 dt  = now - self._nentry_last_t
@@ -393,6 +409,16 @@ class LCDMenu:
                     f'Move to {p}?',
                     lambda: self._do_move_x(p),
                     cancel_mode='menu',
+                )
+
+            elif m == 'teach':
+                slot = self._teach_slot
+                pos  = self._teach_val
+                action = lambda s=slot, p=pos: self._show_confirm(
+                    f'Save {s}',
+                    f'Save pos {p}?',
+                    lambda: self._do_teach_save(s, p),
+                    cancel_mode='teach',
                 )
 
             elif m == 'num_entry':
@@ -511,6 +537,7 @@ class LCDMenu:
         elif mode == 'visc_edit': self._draw_visc_edit()
         elif mode == 'x_move':    self._draw_x_move()
         elif mode == 'num_entry': self._draw_num_entry()
+        elif mode == 'teach':     self._draw_teach()
 
     # ── Individual draw methods ───────────────────────────────
 
@@ -614,6 +641,17 @@ class LCDMenu:
         self._write_row(1, f'  Current:  {cur:>5}     ')
         self._write_row(2, f'  Target:   {val:>5}     ')
         self._write_row(3, f'  Step:{step:>4}  [Press] ')
+
+    def _draw_teach(self):
+        with self._lock:
+            slot = self._teach_slot
+            val  = self._teach_val
+            step = self._teach_step
+        saved = self.hw.hw.slot_positions.get(slot, '?')
+        self._write_row(0, self._hdr(f'Teach {slot}'))
+        self._write_row(1, f'  Saved:   {str(saved):>6}     ')
+        self._write_row(2, f'  Target:  {val:>6}     ')
+        self._write_row(3, f'  Stp:{step:>4}  [Save] ')
 
     def _draw_num_entry(self):
         with self._lock:
@@ -857,6 +895,42 @@ class LCDMenu:
         ]
         self._show_info('Status', lines)
 
+    # ── Teach slots ───────────────────────────────────────────
+
+    def _enter_teach_slots(self):
+        self._push(lambda: 'Teach Slots', self._items_teach_slots)
+
+    def _items_teach_slots(self) -> list:
+        from config import ALL_SLOTS
+        items = []
+        for slot in ALL_SLOTS:
+            pos = self.hw.hw.slot_positions.get(slot)
+            hint = f'{pos:>5}' if pos is not None else '  -- '
+            items.append({
+                'label': f'{slot:<10} {hint}',
+                'hint': '  ',
+                'action': lambda s=slot: self._enter_teach(s),
+            })
+        items.append({'label': 'Back', 'hint': '  ', 'action': self._pop})
+        return items
+
+    def _enter_teach(self, slot: str):
+        saved = self.hw.hw.slot_positions.get(slot)
+        start = saved if saved is not None else self.hw.x_position
+        with self._lock:
+            self._teach_slot   = slot
+            self._teach_val    = start
+            self._teach_step   = 1
+            self._teach_last_t = 0.0
+            self._mode         = 'teach'
+            self._dirty        = True
+
+    def _do_teach_save(self, slot: str, pos: int) -> str:
+        self.hw.move_x(pos)
+        self.hw.hw.set_slot_position(slot, pos)
+        self.hw.hw.save()
+        return f'{slot}={pos} saved'
+
     # ── Move X ────────────────────────────────────────────────
 
     def _enter_move_x(self):
@@ -879,6 +953,7 @@ class LCDMenu:
     def _items_maintenance(self) -> list:
         return [
             {'label': 'Home',        'hint': '  ',        'action': lambda: self._begin_work('Homing...', self._do_homing)},
+            {'label': 'Teach Slots', 'hint': f'{ARROW} ', 'action': self._enter_teach_slots},
             {'label': 'Move X',      'hint': '  ',        'action': self._enter_move_x},
             {'label': 'Tare Scale',  'hint': '  ',        'action': lambda: self._begin_work('Taring...', self._do_tare_scale)},
             {'label': 'Read Weight', 'hint': '  ',        'action': lambda: self._begin_work('Reading...', self._do_read_weight)},

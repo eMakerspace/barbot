@@ -213,3 +213,25 @@ class HardwareConfig:
 
     def position_for_slot(self, slot: str) -> int | None:
         return self.slot_positions.get(slot)
+
+    def set_slot_position(self, slot: str, steps: int):
+        self.slot_positions[slot] = steps
+
+    def save(self):
+        save_json({
+            "x_axis": {
+                "max_steps":      self.x_max,
+                "idle_position":  self.x_idle,
+                "steps_per_mm":   self.steps_per_mm,
+            },
+            "slot_positions": self.slot_positions,
+            "spirit_optic": {
+                "pour_duration_ms":  self.pour_duration_ms,
+                "settle_duration_ms": self.settle_duration_ms,
+                "pour_angle":        self.servo_pour_angle,
+            },
+            "serial": {
+                "port": self.serial_port,
+                "baud": self.serial_baud,
+            },
+        }, self._path)
