@@ -216,6 +216,10 @@ async fn handle_cmd(
                     }))
                     .await;
             }
+            3 if gcmd.minor_number() == 9 => {
+                let samples = gcmd.value_for('N').unwrap_or(10.0) as u8;
+                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Debug { samples })).await;
+            }
             3 => {
                 cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Read)).await;
             }

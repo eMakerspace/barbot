@@ -179,6 +179,33 @@ pub async fn scale_task(
                 }
             }
 
+            crate::cmd::ScaleCmd::Debug { samples } => {
+                let n = samples.max(1) as usize;
+                log::info!("[DBG] DOUT level before wait: {}\r", if data.is_high() { "HIGH (not ready)" } else { "LOW (ready/floating?)" });
+                for i in 0..n {
+                    let t0 = embassy_time::Instant::now();
+                    let ready = wait_data_ready(&data, 1000).await;
+                    let wait_ms = t0.elapsed().as_millis();
+                    if !ready {
+                        log::info!("[DBG] sample {} — wait_data_ready TIMED OUT after {}ms\r", i, wait_ms);
+                        continue;
+                    }
+                    let delay = esp_hal::delay::Delay::new();
+                    let mut value: i32 = 0;
+                    for _ in 0..24 {
+                        clk.set_high();
+                        delay.delay_micros(1);
+                        value = (value << 1) | if data.is_high() { 1 } else { 0 };
+                        clk.set_low();
+                        delay.delay_micros(1);
+                    }
+                    clk.set_high(); delay.delay_micros(1); clk.set_low(); delay.delay_micros(1);
+                    if value & 0x80_0000 != 0 { value |= !0x00FF_FFFF; }
+                    log::info!("[DBG] sample {} — wait={}ms raw={}\r", i, wait_ms, value);
+                }
+                log::info!("[DBG] done\r");
+            }
+
             crate::cmd::ScaleCmd::Fill {
                 pump_index,
                 target_grams,

@@ -53,6 +53,8 @@ pub enum ScaleCmd {
     Fill { pump_index: u8, target_grams: f32 },
     /// Calibrate: current reading (after tare) represents `known_grams`.
     Calibrate { known_grams: f32 },
+    /// Debug: read N raw samples and report timing. Used by G3.9.
+    Debug { samples: u8 },
 }
 pub type ScaleCmdSignal = BiSignal<ScaleCmd>;
 
