@@ -106,6 +106,7 @@ class LCDMenu:
         self._teach_val    = 0       # jogged target step position
         self._teach_step   = 1
         self._teach_last_t = 0.0
+        self._teach_timer: threading.Timer | None = None  # debounce timer
 
         # num_entry state (generic integer input screen)
         self._nentry_title    = ''
@@ -308,7 +309,6 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
 
     def _on_rotate(self, d: int):
-        teach_move = None
         with self._lock:
             m = self._mode
 
@@ -342,7 +342,15 @@ class LCDMenu:
                 self._teach_val  = max(0,
                                    min(self.hw.hw.x_max, self._teach_val + d * step))
                 self._dirty = True
-                teach_move = self._teach_val
+                # Cancel any queued move and schedule a fresh one after 120 ms
+                # of silence — only the final resting position gets sent.
+                if self._teach_timer is not None:
+                    self._teach_timer.cancel()
+                target = self._teach_val
+                self._teach_timer = threading.Timer(
+                    0.12, lambda t=target: self.hw._queue_move(t)
+                )
+                self._teach_timer.start()
 
             elif m == 'num_entry':
                 now = time.time()
@@ -375,10 +383,6 @@ class LCDMenu:
             elif m == 'confirm':
                 self._conf_yn = 1 - self._conf_yn
                 self._dirty = True
-
-        # Live cart movement for teach mode — outside the lock
-        if teach_move is not None:
-            self.hw._queue_move(teach_move)
 
     def _on_press(self):
         """Handle button press. Action is called OUTSIDE the lock."""
@@ -930,6 +934,9 @@ class LCDMenu:
                 except Exception:
                     pass
             with self._lock:
+                if self._teach_timer is not None:
+                    self._teach_timer.cancel()
+                    self._teach_timer = None
                 self._teach_slot   = slot
                 self._teach_val    = self.hw.x_position
                 self._teach_step   = 1
