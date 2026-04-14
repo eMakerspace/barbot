@@ -130,10 +130,10 @@ async fn main(spawner: Spawner) {
         &PUMP_CMD_SIG,
         STOP_CHANNEL.subscriber().unwrap(),
         [
-            Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
             Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
         ],
     ));
     
