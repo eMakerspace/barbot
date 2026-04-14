@@ -393,6 +393,11 @@ HTML = r"""<!DOCTYPE html>
 
     <div class="card p-4 flex flex-col gap-3">
       <p class="section-title">Scale (HX711)</p>
+      <div id="weight-display" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px 16px;text-align:center;">
+        <span style="font-size:0.7rem;color:#64748b;letter-spacing:0.1em;text-transform:uppercase;">Weight</span>
+        <div id="weight-value" style="font-size:2rem;font-weight:700;font-family:monospace;color:#f59e0b;line-height:1.1;">—</div>
+        <div id="weight-raw" style="font-size:0.7rem;color:#475569;margin-top:2px;"></div>
+      </div>
       <div class="flex gap-2">
         <button class="btn btn-blue flex-1 btn-sm" onclick="gcode('G3',this)">
           <i class="fa fa-weight-hanging"></i> Read (G3)
@@ -488,6 +493,16 @@ socket.on('serial_out', data => {
   line.textContent = text;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
+
+  // Update weight display if this line contains a scale reading
+  const wm = text.match(/(-?[\d.]+)\s*g\s*\(raw:\s*(-?[\d]+)/i);
+  if (wm) {
+    document.getElementById('weight-value').textContent = parseFloat(wm[1]).toFixed(2) + ' g';
+    document.getElementById('weight-raw').textContent = 'raw: ' + wm[2];
+  } else if (/scale tared/i.test(text)) {
+    document.getElementById('weight-value').textContent = '0.00 g';
+    document.getElementById('weight-raw').textContent = 'tared';
+  }
 });
 
 function refreshPorts() { socket.emit('list_ports'); }
