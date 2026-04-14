@@ -28,7 +28,7 @@ pub const MICROSTEPS: f64 = 4.0;
 
 pub const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
     .with_acceleration(3000.0 * MICROSTEPS)
-    .with_max_speed(4000.0 * MICROSTEPS);
+    .with_max_speed(3800.0 * MICROSTEPS);
 
 const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
     .with_acceleration(8000.0 * MICROSTEPS)
