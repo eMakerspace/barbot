@@ -342,13 +342,13 @@ class LCDMenu:
                 self._teach_val  = max(0,
                                    min(self.hw.hw.x_max, self._teach_val + d * step))
                 self._dirty = True
-                # Cancel any queued move and schedule a fresh one after 120 ms
+                # Cancel any queued move and schedule a fresh one after 250 ms
                 # of silence — only the final resting position gets sent.
                 if self._teach_timer is not None:
                     self._teach_timer.cancel()
                 target = self._teach_val
                 self._teach_timer = threading.Timer(
-                    0.12, lambda t=target: self.hw._queue_move(t)
+                    0.25, lambda t=target: self.hw._queue_move(t)
                 )
                 self._teach_timer.start()
 

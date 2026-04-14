@@ -31,6 +31,7 @@ Synchronisation strategy:
 """
 
 import queue
+import re
 import threading
 import time
 
@@ -236,7 +237,7 @@ class HardwareInterface:
         self._esp.send("G3")
         try:
             self._esp.wait_for(
-                ["Weight:", "HX711 not", "cannot read", "not calibrated"],
+                ["Weight:", "raw:", "HX711 not", "cannot read", "not calibrated"],
                 timeout=timeout,
             )
         except TimeoutError:
@@ -353,21 +354,38 @@ class HardwareInterface:
             return "Scale tared."
         return "Scale tare (simulated)."
 
+    _WEIGHT_RE = re.compile(r"(?:Weight:|weight:)\s*(-?[\d.]+)\s*g", re.IGNORECASE)
+
+    def _parse_grams(self, line: str) -> "float | None":
+        """Extract grams from a weight line regardless of log prefix."""
+        # Handles: "Weight: 12.34g (raw: …)"
+        #          "INFO Weight: 12.34g (raw: …)"
+        #          "INFOWeight: 12.34g (raw: …)"  (firmware log artifact)
+        m = self._WEIGHT_RE.search(line)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                pass
+        # Fallback: look for a bare float followed by 'g' anywhere in the line
+        m2 = re.search(r"(-?[\d.]+)\s*g\b", line)
+        if m2:
+            try:
+                return float(m2.group(1))
+            except ValueError:
+                pass
+        return None
+
     def read_weight(self) -> float:
         """Read current weight from the scale.  Returns grams as float."""
         if self._esp:
             self._esp.send("G3")
             line = self._esp.wait_for(
-                ["Weight:", "HX711 not", "cannot read"],
+                ["Weight:", "raw:", "HX711 not", "cannot read"],
                 timeout=10,
             )
-            if "Weight:" in line:
-                try:
-                    # "Weight: 12.34g (raw: …)"
-                    return float(line.split("Weight:")[1].split("g")[0].strip())
-                except Exception:
-                    pass
-            return 0.0
+            g = self._parse_grams(line)
+            return g if g is not None else 0.0
         return 0.0
 
     def read_weight_str(self) -> str:
@@ -376,11 +394,11 @@ class HardwareInterface:
             self._esp.send("G3")
             try:
                 line = self._esp.wait_for(
-                    ["Weight:", "HX711 not", "cannot read"],
+                    ["Weight:", "raw:", "HX711 not", "cannot read"],
                     timeout=10,
                 )
-                if "Weight:" in line:
-                    g = float(line.split("Weight:")[1].split("g")[0].strip())
+                g = self._parse_grams(line)
+                if g is not None:
                     return f"Weight: {g:.1f}g"
                 return f"Scale err: {line[:12]}"
             except TimeoutError:
