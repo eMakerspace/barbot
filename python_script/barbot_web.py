@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """BarBot Web Control Panel — Flask + SocketIO (threading mode, no monkey-patch)."""
 
+import json
 import threading
 import time
+from pathlib import Path
 import serial
 import serial.tools.list_ports
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, jsonify
 from flask_socketio import SocketIO, emit
+
+HW_CONFIG_PATH = Path(__file__).parent.parent / "python_script2" / "config" / "hardware_config.json"
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "barbot-secret"
@@ -100,6 +104,20 @@ def handle_disconnect_serial():
 @socketio.on("send_gcode")
 def handle_gcode(data):
     send_gcode(data.get("cmd", ""))
+
+
+# ── REST helpers ─────────────────────────────────────────────────────────────
+
+@app.route("/api/slots")
+def api_slots():
+    try:
+        cfg = json.loads(HW_CONFIG_PATH.read_text())
+        return jsonify({
+            "slots": cfg.get("slot_positions", {}),
+            "x_max": cfg.get("x_axis", {}).get("max_steps", 6000),
+        })
+    except Exception as e:
+        return jsonify({"slots": {}, "x_max": 6000, "error": str(e)})
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -261,6 +279,21 @@ HTML = r"""<!DOCTYPE html>
           <button class="btn btn-blue btn-sm" onclick="sendAbsMove(this)">Go</button>
         </div>
       </div>
+      <div class="border-t border-slate-700 pt-3">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-xs text-slate-400">Spirit Slots</p>
+          <button class="btn btn-slate btn-sm py-0 px-2 text-xs" onclick="fetchSlots()">
+            <i class="fa fa-rotate"></i>
+          </button>
+        </div>
+        <div id="spirit-slots" class="grid grid-cols-4 gap-1 mb-3">
+          <span class="text-xs text-slate-500 col-span-4">Loading…</span>
+        </div>
+        <p class="text-xs text-slate-400 mb-1">Mixer Slots</p>
+        <div id="mixer-slots" class="grid grid-cols-4 gap-1">
+          <span class="text-xs text-slate-500 col-span-4">Loading…</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -277,11 +310,29 @@ HTML = r"""<!DOCTYPE html>
         <input type="range" id="servo-slider" min="0" max="180" value="90" step="1" class="w-full"
           oninput="document.getElementById('servo-val').textContent=this.value+'°'"
           onchange="gcode('G1 Z'+this.value)">
+        <button class="btn btn-blue w-full mt-2 btn-sm"
+          onclick="gcode('G1 Z'+document.getElementById('servo-slider').value,this)">
+          <i class="fa fa-rotate"></i> Set Angle (G1)
+        </button>
       </div>
-      <button class="btn btn-blue w-full btn-sm"
-        onclick="gcode('G1 Z'+document.getElementById('servo-slider').value,this)">
-        <i class="fa fa-rotate"></i> Set Angle (G1)
-      </button>
+      <div class="border-t border-slate-700 pt-3 grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Open angle °</label>
+          <input type="number" id="servo-open" value="90" min="0" max="180" class="mb-2">
+          <button class="btn btn-green w-full btn-sm"
+            onclick="servoPreset('open',this)">
+            <i class="fa fa-lock-open"></i> Open
+          </button>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Close angle °</label>
+          <input type="number" id="servo-close" value="180" min="0" max="180" class="mb-2">
+          <button class="btn btn-slate w-full btn-sm"
+            onclick="servoPreset('close',this)">
+            <i class="fa fa-lock"></i> Close
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="card p-4 flex flex-col gap-3">
@@ -400,7 +451,7 @@ let cmdHistory = [];
 let histIdx = -1;
 try { cmdHistory = JSON.parse(sessionStorage.cmdHistory || '[]'); } catch(e) {}
 
-socket.on('connect', () => refreshPorts());
+socket.on('connect', () => { refreshPorts(); fetchSlots(); });
 socket.on('disconnect', () => {
   document.getElementById('status-dot').className = 'dot dot-red';
   document.getElementById('status-text').textContent = 'Socket disconnected — reload page';
@@ -521,6 +572,58 @@ function sendPump(idx, wait, btn) {
 function stopAllPumps(btn) {
   [0,1,2,3].forEach(i => gcode(`G2 I${i} D0`));
   flash(btn);
+}
+
+// ── Slots ────────────────────────────────────────────────────────────────────
+const SPIRIT_SLOTS = ['Slot_1','Slot_2','Slot_3','Slot_4','Slot_5','Slot_6','Slot_7','Slot_8'];
+const MIXER_SLOTS  = ['Slot_A','Slot_B','Slot_C','Slot_D'];
+
+async function fetchSlots() {
+  try {
+    const data = await fetch('/api/slots').then(r => r.json());
+    buildSlotButtons(data.slots || {});
+  } catch(e) {
+    console.error('fetchSlots failed', e);
+  }
+}
+
+function buildSlotButtons(slots) {
+  function makeBtn(name, pos) {
+    const label = name.replace('Slot_', '');
+    const posStr = pos != null ? pos : '?';
+    const dimmed = pos == null ? ' opacity-40' : '';
+    return `<button class="btn btn-slate btn-sm flex-col py-1 gap-0 leading-tight${dimmed}"
+              style="min-width:0"
+              onclick="moveToSlot('${name}',${pos ?? 'null'})">
+              <span class="text-xs font-bold">${label}</span>
+              <span class="text-amber-400 font-mono" style="font-size:0.65rem">${posStr}</span>
+            </button>`;
+  }
+  document.getElementById('spirit-slots').innerHTML =
+    SPIRIT_SLOTS.map(s => makeBtn(s, slots[s] ?? null)).join('');
+  document.getElementById('mixer-slots').innerHTML =
+    MIXER_SLOTS.map(s => makeBtn(s, slots[s] ?? null)).join('');
+}
+
+function moveToSlot(name, pos) {
+  if (pos == null) {
+    const el = document.getElementById('console');
+    const line = document.createElement('div');
+    line.className = 'c-err';
+    line.textContent = `[warn] ${name} has no position saved`;
+    el.appendChild(line); el.scrollTop = el.scrollHeight;
+    return;
+  }
+  gcode(`G0 X${pos}${buildAccelSuffix()}`);
+}
+
+// ── Servo presets ─────────────────────────────────────────────────────────────
+function servoPreset(which, btn) {
+  const angle = document.getElementById(`servo-${which}`).value;
+  const slider = document.getElementById('servo-slider');
+  slider.value = angle;
+  document.getElementById('servo-val').textContent = angle + '°';
+  gcode(`G1 Z${angle}`, btn);
 }
 
 function sendCalibrate(btn) {
