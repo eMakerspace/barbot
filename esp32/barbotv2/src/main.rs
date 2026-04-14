@@ -143,13 +143,13 @@ async fn main(spawner: Spawner) {
         Output::new(peripherals.GPIO9, esp_hal::gpio::Level::Low, pump_pin_cfg),
     ));
 
-    // HX711 scale: DATA on GPIO10, CLK on GPIO8
+    // HX711 scale: DATA on GPIO8, CLK on GPIO10
     let scale_data = Input::new(
-        peripherals.GPIO10,
+        peripherals.GPIO8,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::None),
     );
     let scale_clk = Output::new(
-        peripherals.GPIO8,
+        peripherals.GPIO10,
         esp_hal::gpio::Level::Low,
         pump_pin_cfg,
     );
