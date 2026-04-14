@@ -5,6 +5,7 @@ use num_traits::ToPrimitive;
 use num_traits::float::FloatCore;
 
 use crate::cmd::{Cmd, CmdChannel, PumpCmd, StepperCmd, StopCmd, StopCmdPub};
+use crate::stepper::AccelSpeedConfig;
 
 /// Read from the USB serial and execute the commands
 #[embassy_executor::task]
@@ -77,6 +78,29 @@ pub async fn serial_reader(
     }
 }
 
+fn parse_optional_accel_config(
+    gcmd: &gcode::GCode,
+) -> Option<AccelSpeedConfig> {
+    let accel_opt = gcmd.value_for('A');
+    let speed_opt = gcmd.value_for('S');
+
+    // If neither parameter is provided, use None to signal default config
+    if accel_opt.is_none() && speed_opt.is_none() {
+        return None;
+    }
+
+    // Use global defaults for whichever parameter is not provided
+    let accel_full_steps = accel_opt.unwrap_or(3000.0) as f64;
+    let speed_full_steps = speed_opt.unwrap_or(4000.0) as f64;
+
+    // Convert from full steps to microsteps and build config
+    let config = AccelSpeedConfig::zero()
+        .with_acceleration(accel_full_steps * crate::MICROSTEPS)
+        .with_max_speed(speed_full_steps * crate::MICROSTEPS);
+
+    Some(config)
+}
+
 async fn handle_cmd(
     cmd: &str,
     cmd_chan: &'static CmdChannel,
@@ -101,7 +125,7 @@ async fn handle_cmd(
 
     match gcmd.mnemonic() {
         gcode::Mnemonic::General => match gcmd.major_number() {
-            // `G0.1 X{range_fact}` for moving the stepper motor to `range_fact * end_step`.
+            // `G0.1 X{range_fact} [A{accel}] [S{speed}]` for moving the stepper motor to `range_fact * end_step`.
             0 if gcmd.minor_number() == 1 => {
                 let Some(range_fact) = gcmd.value_for('X') else {
                     invalid_cmd_msg("missing X parameter");
@@ -111,50 +135,39 @@ async fn handle_cmd(
                     invalid_cmd_msg("X parameter out of range");
                     return;
                 }
+                let accel_cfg = parse_optional_accel_config(&gcmd);
                 cmd_chan
-                    .send(Cmd::Stepper(StepperCmd::GoToRangeFact(range_fact)))
+                    .send(Cmd::Stepper(StepperCmd::GoToRangeFact(range_fact, accel_cfg)))
                     .await;
             }
-            // `G0 X{position}` Move stepper motor to step {position}.
+            // `G0 X{position} [A{accel}] [S{speed}]` Move stepper motor to step {position}.
             0 => {
                 if let Some(loc) = gcmd.value_for('X') {
-                    let Some(loc) = (loc * 8.0).round().to_i32() else {
+                    let Some(loc) = (loc * crate::MICROSTEPS as f32).round().to_i32() else {
                         invalid_cmd_msg("X parameter out of range");
                         return;
                     };
 
-                    cmd_chan.send(Cmd::Stepper(StepperCmd::GoTo(loc))).await;
+                    let accel_cfg = parse_optional_accel_config(&gcmd);
+                    cmd_chan.send(Cmd::Stepper(StepperCmd::GoTo(loc, accel_cfg))).await;
                 } else {
                     invalid_cmd_msg("missing X parameter");
                     return;
                 }
             }
-            // `G1.0 Z{time_ms}` to move the lift motor down for `{time_ms}` milliseconds.
-            // `G1.1 Z{time_ms}` to move the lift motor up for `{time_ms}` milliseconds.
+            // `G1 Z{angle}` to move servo to angle (0–180 degrees).
             1 => {
-                let Some(time_ms) = gcmd.value_for('Z') else {
-                    invalid_cmd_msg("missing Z<time_ms> parameter");
+                let Some(angle) = gcmd.value_for('Z') else {
+                    invalid_cmd_msg("missing Z<angle> parameter (0-180)");
                     return;
                 };
-                let Some(time_ms) = time_ms.round().to_u32() else {
-                    invalid_cmd_msg("Z parameter out of range");
+                let angle = angle.round();
+                if angle < 0.0 || angle > 180.0 {
+                    invalid_cmd_msg("Z angle out of range (0-180)");
                     return;
-                };
-
-                let is_up = match gcmd.minor_number() {
-                    0 => false,
-                    1 => true,
-                    _ => {
-                        invalid_cmd_msg("minor number must be 0 (down) or 1 (up)");
-                        return;
-                    }
-                };
-
+                }
                 cmd_chan
-                    .send(Cmd::LiftMotor(crate::cmd::LiftMotorCmd {
-                        direction_up: is_up,
-                        duration_ms: time_ms,
-                    }))
+                    .send(Cmd::Servo(crate::cmd::ServoCmd { angle: angle as u8 }))
                     .await;
             }
             // `G2 N{pump_index} T{time_ms}` Activate pump number {pump_index} for {time_ms} milliseconds.
@@ -183,6 +196,47 @@ async fn handle_cmd(
                         index: pump_index,
                         duration_ms: time_ms,
                         wait: gcmd.minor_number() == 1,
+                    }))
+                    .await;
+            }
+            // `G3`     — read weight
+            // `G3.1`   — tare the scale
+            // `G3.2 W{grams}` — calibrate with known weight (after tare)
+            3 if gcmd.minor_number() == 1 => {
+                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Tare)).await;
+            }
+            3 if gcmd.minor_number() == 2 => {
+                let Some(grams) = gcmd.value_for('W') else {
+                    invalid_cmd_msg("missing W<grams> parameter");
+                    return;
+                };
+                cmd_chan
+                    .send(Cmd::Scale(crate::cmd::ScaleCmd::Calibrate {
+                        known_grams: grams,
+                    }))
+                    .await;
+            }
+            3 => {
+                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Read)).await;
+            }
+            // `G4 I{pump} W{grams}` — fill using pump I until weight drops by W grams
+            4 => {
+                let Some(pump_index) = gcmd.value_for('I') else {
+                    invalid_cmd_msg("missing I<pump_index> parameter");
+                    return;
+                };
+                let Some(target_grams) = gcmd.value_for('W') else {
+                    invalid_cmd_msg("missing W<grams> parameter");
+                    return;
+                };
+                let Some(pump_index) = pump_index.round().to_u8() else {
+                    invalid_cmd_msg("I parameter out of range");
+                    return;
+                };
+                cmd_chan
+                    .send(Cmd::Scale(crate::cmd::ScaleCmd::Fill {
+                        pump_index,
+                        target_grams,
                     }))
                     .await;
             }

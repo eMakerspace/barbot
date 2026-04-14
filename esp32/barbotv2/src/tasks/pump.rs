@@ -49,6 +49,14 @@ pub async fn pump_task(
             };
 
             let idx = cmd.index as usize;
+
+            // duration_ms == 0 means stop this pump immediately.
+            if cmd.duration_ms == 0 {
+                gpios[idx].set_level(INACTIVE_LEVEL);
+                expirations[idx] = None;
+                continue;
+            }
+
             let inst = Instant::now() + Duration::from_millis_floor(cmd.duration_ms as u64);
 
             // Activate the pump.
@@ -91,19 +99,25 @@ pub async fn pump_task(
             },
             cmd = cmd_sig.receive().fuse() => {
                 let cmd_idx = cmd.index as usize;
-                let cmd_inst = Instant::now() + Duration::from_millis_floor(cmd.duration_ms as u64);
 
-                // Activate the pump.
-                gpios[cmd_idx].set_level(ACTIVE_LEVEL);
-                if to_block.is_some() {
-                    log::warn!("Pump command received while blocking\r");
-                }
-
-                if cmd.wait {
-                    to_block = Some((cmd, cmd_idx, cmd_inst))
+                // duration_ms == 0 means stop this pump immediately.
+                if cmd.duration_ms == 0 {
+                    gpios[cmd_idx].set_level(INACTIVE_LEVEL);
+                    expirations[cmd_idx] = None;
+                    if let Some((_, b_idx, _)) = &to_block && *b_idx == cmd_idx {
+                        to_block = None;
+                    }
                 } else {
-                    // Schedule the non-blocking command.
-                    expirations[cmd_idx] = Some(cmd_inst);
+                    let cmd_inst = Instant::now() + Duration::from_millis_floor(cmd.duration_ms as u64);
+                    gpios[cmd_idx].set_level(ACTIVE_LEVEL);
+                    if to_block.is_some() {
+                        log::warn!("Pump command received while blocking\r");
+                    }
+                    if cmd.wait {
+                        to_block = Some((cmd, cmd_idx, cmd_inst))
+                    } else {
+                        expirations[cmd_idx] = Some(cmd_inst);
+                    }
                 }
             },
         }

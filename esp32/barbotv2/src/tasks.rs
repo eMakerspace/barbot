@@ -4,9 +4,10 @@ use futures::{FutureExt, select_biased};
 
 use crate::cmd::{StopCmd, StopCmdImmediatePub};
 
-pub mod lift_motor;
+pub mod servo;
 pub mod pump;
 pub mod route_cmd;
+pub mod scale;
 pub mod serial;
 pub mod stepper;
 

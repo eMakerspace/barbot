@@ -42,7 +42,7 @@ impl HomingState {
         }
         log::info!(
             "Homing to start position successful ({} steps)\r",
-            stepper.curr_pos().abs() / 8
+            stepper.curr_pos().abs() / crate::MICROSTEPS as i32
         );
         stepper.set_curr_pos(0);
 
@@ -61,7 +61,7 @@ impl HomingState {
         self.end_pos = stepper.curr_pos();
         self.homing_needed = false;
 
-        log::info!("Homing successful, end pos = {}\r", self.end_pos / 8);
+        log::info!("Homing successful, end pos = {}\r", self.end_pos / crate::MICROSTEPS as i32);
     }
 }
 
@@ -188,7 +188,7 @@ pub async fn stepper_task(
 
     loop {
         let cmd = stepper_cmd_sig.receive().await;
-        let pos = match cmd.value {
+        let (pos, accel_cfg) = match cmd.value {
             StepperCmd::Home() => {
                 homing_state
                     .home_stepper(&mut stepper, &END_SWITCH_SIGNAL, &EMERGENCY_STOP_SIGNAL)
@@ -199,16 +199,20 @@ pub async fn stepper_task(
                 log::warn!("Ignoring command, homing required\r");
                 continue;
             }
-            StepperCmd::GoTo(pos) => pos,
-            StepperCmd::GoToRangeFact(fact) => ((homing_state.end_pos as f32 * fact).round() as i32)
+            StepperCmd::GoTo(pos, accel_cfg) => (pos, accel_cfg),
+            StepperCmd::GoToRangeFact(fact, accel_cfg) => (((homing_state.end_pos as f32 * fact).round() as i32)
                 .min(homing_state.end_pos)
-                .max(0),
+                .max(0), accel_cfg),
         };
 
         assert!(
             !homing_state.homing_needed,
             "Homing should have been handled above"
         );
+
+        // Use provided accel config or fall back to stepper's default
+        let cfg = accel_cfg.unwrap_or_else(|| stepper.accel_speed());
+
         select_biased! {
             _ = EMERGENCY_STOP_SIGNAL.wait().fuse() => {
                 homing_state.homing_needed = true;
@@ -233,7 +237,7 @@ pub async fn stepper_task(
                     }
                 }
             },
-            _ = stepper.run_to_pos(pos).fuse() => ()
+            _ = stepper.run_to_pos_with_accel_speed(pos, cfg).fuse() => ()
         };
     }
 }

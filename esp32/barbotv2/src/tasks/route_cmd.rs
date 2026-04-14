@@ -8,7 +8,8 @@ pub struct HandleCmd {
     pub stepper_sig: &'static StepperCmdSignal,
     pub pump_sig: &'static PumpCmdSignal,
     pub stop_sub: StopCmdSub,
-    pub lift_motor_sig: &'static crate::cmd::LiftMotorCmdSignal,
+    pub servo_sig: &'static crate::cmd::ServoCmdSignal,
+    pub scale_sig: &'static crate::cmd::ScaleCmdSignal,
 }
 
 #[embassy_executor::task]
@@ -18,7 +19,8 @@ pub async fn route_cmd(handle_cmd: HandleCmd) {
         stepper_sig,
         pump_sig,
         mut stop_sub,
-        lift_motor_sig,
+        servo_sig,
+        scale_sig,
     } = handle_cmd;
 
     let mut stopped = false;
@@ -47,16 +49,19 @@ pub async fn route_cmd(handle_cmd: HandleCmd) {
 
         match cmd {
             Cmd::Stepper(stepper_cmd) => {
+                // Always home the servo to 180° before any cart movement to avoid collisions.
+                servo_sig.send(crate::cmd::ServoCmd { angle: 180 }).await;
+                Timer::after_millis(500).await;
                 stepper_sig.send(stepper_cmd).await;
             }
             Cmd::Pump(pump_cmd) => {
                 pump_sig.send(pump_cmd).await;
             }
-            Cmd::Led() => {
-                // TODO
+            Cmd::Servo(servo_cmd) => {
+                servo_sig.send(servo_cmd).await;
             }
-            Cmd::LiftMotor(lift_cmd) => {
-                lift_motor_sig.send(lift_cmd).await;
+            Cmd::Scale(scale_cmd) => {
+                scale_sig.send(scale_cmd).await;
             }
             Cmd::Wait(time_ms) => {
                 Timer::after_millis(time_ms as u64).await;

@@ -20,6 +20,11 @@
     },
     "spirit_optic": {
         "pour_duration_ms": 1500,
-        "settle_duration_ms": 500
+        "settle_duration_ms": 500,
+        "pour_angle": 90
+    },
+    "serial": {
+        "port": "/dev/ttyACM1",
+        "baud": 115200
     }
 }

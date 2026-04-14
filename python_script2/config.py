@@ -201,7 +201,11 @@ class HardwareConfig:
         optic = data.get("spirit_optic", {})
         self.pour_duration_ms: int = optic.get("pour_duration_ms", 1500)
         self.settle_duration_ms: int = optic.get("settle_duration_ms", 500)
+        self.servo_pour_angle: int = optic.get("pour_angle", 90)
 
+        ser = data.get("serial", {})
+        self.serial_port: str | None = ser.get("port", None)
+        self.serial_baud: int = ser.get("baud", 115200)
 
     @classmethod
     def load(cls, path: Path = HARDWARE_CONFIG_PATH) -> "HardwareConfig":

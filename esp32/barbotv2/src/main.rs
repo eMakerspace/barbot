@@ -10,7 +10,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use stepper::Stepper;
 
-use crate::cmd::{CmdChannel, LiftMotorCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
+use crate::cmd::{CmdChannel, ScaleCmdSignal, ServoCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -23,20 +23,23 @@ pub mod utils;
 
 extern crate alloc;
 
-// Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
-const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(1000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(2000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
+// Microstepping factor: hardware is configured for 1/4 steps.
+pub const MICROSTEPS: f64 = 4.0;
+
+pub const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
+    .with_acceleration(3000.0 * MICROSTEPS)
+    .with_max_speed(4000.0 * MICROSTEPS);
 
 const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(8000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(300.0 * 8.0); // 0.1 turns / seccond (in simulation, 200 steps / turn)
+    .with_acceleration(8000.0 * MICROSTEPS)
+    .with_max_speed(300.0 * MICROSTEPS);
 
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static PUMP_CMD_SIG: PumpCmdSignal = PumpCmdSignal::new();
-static LIFT_MOTOR_CMD_SIG: LiftMotorCmdSignal = LiftMotorCmdSignal::new();
+static SERVO_CMD_SIG: ServoCmdSignal = ServoCmdSignal::new();
+static SCALE_CMD_SIG: ScaleCmdSignal = ScaleCmdSignal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -72,7 +75,7 @@ async fn main(spawner: Spawner) {
     ));
 
     let emergency_stop = Input::new(
-        peripherals.GPIO9,
+        peripherals.GPIO2,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
     spawner.must_spawn(tasks::emergency_stop_monitor(
@@ -83,7 +86,7 @@ async fn main(spawner: Spawner) {
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
         idle_output_level: esp_hal::gpio::Level::Low,
-        clk_divider: 80, // 2 microsecond tick (40 MHz / 80)
+        clk_divider: 40, // 1 microsecond tick (40 MHz / 40)
         memsize: 1,
         ..Default::default()
     };
@@ -92,7 +95,7 @@ async fn main(spawner: Spawner) {
 
     let mut stepper = Stepper::new(
         stepper_channel,
-        Rate::from_hz(40_000_000 / 80),
+        Rate::from_hz(40_000_000 / 40),
         peripherals.GPIO21,
         false,
     );
@@ -118,7 +121,8 @@ async fn main(spawner: Spawner) {
         stepper_sig: &STEPPER_CMD_SIG,
         pump_sig: &PUMP_CMD_SIG,
         stop_sub: STOP_CHANNEL.subscriber().unwrap(),
-        lift_motor_sig: &LIFT_MOTOR_CMD_SIG,
+        servo_sig: &SERVO_CMD_SIG,
+        scale_sig: &SCALE_CMD_SIG,
     }));
 
     let pump_pin_cfg = gpio::OutputConfig::default().with_drive_mode(gpio::DriveMode::PushPull);
@@ -133,14 +137,29 @@ async fn main(spawner: Spawner) {
         ],
     ));
     
-    spawner.must_spawn(
-        tasks::lift_motor::lift_motor(
-            &LIFT_MOTOR_CMD_SIG,
-            STOP_CHANNEL.subscriber().unwrap(),
-            Output::new(peripherals.GPIO10, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO8, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
-        )
+    spawner.must_spawn(tasks::servo::servo_task(
+        &SERVO_CMD_SIG,
+        STOP_CHANNEL.subscriber().unwrap(),
+        Output::new(peripherals.GPIO9, esp_hal::gpio::Level::Low, pump_pin_cfg),
+    ));
+
+    // HX711 scale: DATA on GPIO8, CLK on GPIO10
+    let scale_data = Input::new(
+        peripherals.GPIO8,
+        InputConfig::default().with_pull(esp_hal::gpio::Pull::None),
     );
+    let scale_clk = Output::new(
+        peripherals.GPIO10,
+        esp_hal::gpio::Level::Low,
+        pump_pin_cfg,
+    );
+    spawner.must_spawn(tasks::scale::scale_task(
+        &SCALE_CMD_SIG,
+        &PUMP_CMD_SIG,
+        STOP_CHANNEL.subscriber().unwrap(),
+        scale_clk,
+        scale_data,
+    ));
 
     info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));
 }

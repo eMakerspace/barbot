@@ -1,4 +1,5 @@
 **/__pychache__/**
+**/venv/
 api_config.py
 web_configurator/*.png
 *.pyc
