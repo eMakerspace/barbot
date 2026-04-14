@@ -308,6 +308,7 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
 
     def _on_rotate(self, d: int):
+        teach_move = None
         with self._lock:
             m = self._mode
 
@@ -341,6 +342,7 @@ class LCDMenu:
                 self._teach_val  = max(0,
                                    min(self.hw.hw.x_max, self._teach_val + d * step))
                 self._dirty = True
+                teach_move = self._teach_val
 
             elif m == 'num_entry':
                 now = time.time()
@@ -373,6 +375,10 @@ class LCDMenu:
             elif m == 'confirm':
                 self._conf_yn = 1 - self._conf_yn
                 self._dirty = True
+
+        # Live cart movement for teach mode — outside the lock
+        if teach_move is not None:
+            self.hw._queue_move(teach_move)
 
     def _on_press(self):
         """Handle button press. Action is called OUTSIDE the lock."""
@@ -916,17 +922,33 @@ class LCDMenu:
 
     def _enter_teach(self, slot: str):
         saved = self.hw.hw.slot_positions.get(slot)
-        start = saved if saved is not None else self.hw.x_position
+
+        def _move_then_teach():
+            if saved is not None:
+                try:
+                    self.hw.move_x(saved)
+                except Exception:
+                    pass
+            with self._lock:
+                self._teach_slot   = slot
+                self._teach_val    = self.hw.x_position
+                self._teach_step   = 1
+                self._teach_last_t = 0.0
+                self._mode         = 'teach'
+                self._dirty        = True
+
         with self._lock:
-            self._teach_slot   = slot
-            self._teach_val    = start
-            self._teach_step   = 1
-            self._teach_last_t = 0.0
-            self._mode         = 'teach'
+            self._mode         = 'working'
+            self._work_title   = f'Moving to {slot}'
+            self._work_done    = False
+            self._work_result  = ''
+            self._work_dismiss = False
             self._dirty        = True
 
+        threading.Thread(target=_move_then_teach, daemon=True).start()
+
     def _do_teach_save(self, slot: str, pos: int) -> str:
-        self.hw.move_x(pos)
+        # Cart is already at pos from live jogging — just persist
         self.hw.hw.set_slot_position(slot, pos)
         self.hw.hw.save()
         return f'{slot}={pos} saved'
