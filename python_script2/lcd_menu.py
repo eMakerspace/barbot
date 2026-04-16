@@ -1061,6 +1061,9 @@ class LCDMenu:
     def _do_tare_scale(self) -> str:
         return self.hw.tare_scale()
 
+    def _do_calibrate_scale(self, known_grams: int) -> str:
+        return self.hw.calibrate_scale(float(known_grams))
+
     def _do_read_weight(self) -> str:
         return self.hw.read_weight_str()
 
@@ -1463,8 +1466,29 @@ class LCDMenu:
             {'label': f'Tubing comp {comp:>4}g',
              'hint': '  ',
              'action': lambda: self._hw_num('Scale', 'Tubing comp (g):', 'pump_tubing_compensation_g', 0, 50, 1, 5)},
+            {'label': 'Calibrate Scale',
+             'hint': '  ',
+             'action': self._enter_calibrate_scale},
             {'label': 'Back', 'hint': '  ', 'action': self._pop},
         ]
+
+    def _enter_calibrate_scale(self):
+        """Enter known-weight number entry, then tare + calibrate."""
+        self._enter_num(
+            'Calibrate Scale',
+            'Known weight (g):',
+            '_calib_grams',
+            1, 2000, 1, 10,
+            self._confirm_calibrate_scale,
+            initial_v=100,
+        )
+
+    def _confirm_calibrate_scale(self, grams: int):
+        self._show_confirm(
+            'Calibrate Scale',
+            f'Use {grams}g weight?',
+            lambda g=grams: self._begin_work('Calibrating...', lambda: self._do_calibrate_scale(g)),
+        )
 
     def _enter_num(self, title: str, subtitle: str, field: str,
                    min_v: int, max_v: int, step: int, fast_step,

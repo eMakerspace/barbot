@@ -969,6 +969,27 @@ class HardwareInterface:
             return "Scale tared."
         return "Scale tare (simulated)."
 
+    def calibrate_scale(self, known_grams: float) -> str:
+        """Tare then calibrate scale with a known weight on the platform.
+
+        Sends G3.1 (tare) then G3.2 W{grams}. The ESP32 responds with
+        'Calibrated: X counts/gram' which triggers _save_calibration_factor,
+        persisting the value to hardware_config.json for restore on next boot.
+        """
+        if not self._esp:
+            return "Calibration (simulated)."
+        self._esp.send("G3.1")
+        self._esp.wait_for("Scale tared", error_patterns=["HX711 not"], timeout=10)
+        self._esp.send(f"G3.2 W{known_grams:.1f}")
+        line = self._esp.wait_for(
+            ["Calibrated:", "Calibration failed"],
+            error_patterns=["HX711 not"],
+            timeout=10,
+        )
+        if "failed" in line.lower():
+            return f"Calibration failed: {line}"
+        return f"Calibrated OK: {line.split('Calibrated:')[-1].strip()}"
+
     _WEIGHT_RE = re.compile(r"(?:Weight:|weight:)\s*(-?[\d.]+)\s*g", re.IGNORECASE)
 
     def _parse_grams(self, line: str) -> "float | None":
