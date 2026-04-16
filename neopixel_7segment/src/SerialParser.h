@@ -4,19 +4,42 @@
 
 // Command types parsed from serial input
 enum class CommandType : uint8_t {
-    Static,      // static display of a number: "42"
-    Blink,       // blinking number: "-bl 44"
-    Breathe,     // breathing number: "-br 82"
-    Animate,     // fancy animations: "-i"
-    Cup,         // falling cup animation: "-c"
-    Brightness,  // set LED strip brightness: "-bri 128"
-    Invalid      // unrecognized command
+    Static,        // static display of a number: "42"
+    Blink,         // blinking number: "-bl 44"
+    Breathe,       // breathing number: "-br 82"
+    Animate,       // fancy animations: "-i"
+    Cup,           // falling cup animation: "-c"
+    Brightness,    // set LED strip brightness: "-bri 128"
+    Strobe,        // fast red strobe all LEDs: "-s"
+    Count,         // count 00→99→00 at 0.4s takt: "-cnt"
+    Moving,        // moving to slot animation: "-mv"
+    Pouring,       // pouring spirit animation: "-pour"
+    Mixing,        // mixing/dispensing animation: "-mix"
+    Done,          // drink done celebration: "-done"
+    CupWait,       // waiting for cup: "-cupwait"
+    DrinkReady,    // drink ready: green ring pulse + attention bar/U: "-drinkready"
+    OverdueStrobe, // overdue: full red strobe everything: "-overduestrobe"
+    DrinkReadyNum, // escalating blink of order number: "-drinknum 42"
+    ErrorEffect,   // set LED fault/status effect: "-e RED_SOLID"
+    Invalid        // unrecognized command
+};
+
+enum class LedEffectCode : uint8_t {
+    Idle = 0,
+    GreenSolid,
+    RedSolid,
+    RedFlashFast,
+    RedPulse,
+    YellowSolid,
+    OrangeFlash,
+    GreenFlashSlow,
+    GreenFlashFast,
 };
 
 // Parsed command structure
 struct Command {
     CommandType type;
-    uint8_t     value;   // the number to display (for Static/Blink/Breathe)
+    uint8_t     value;   // number or LedEffectCode (for ErrorEffect)
 
     Command() : type(CommandType::Invalid), value(0) {}
 };

@@ -1,53 +1,78 @@
-use embassy_time::Timer;
-use esp_hal::gpio::Output;
+use embedded_hal::pwm::SetDutyCycle;
+use esp_hal::ledc::{
+    self,
+    channel::{self, ChannelIFace},
+    timer::{self, TimerIFace},
+    LowSpeed, LSGlobalClkSource,
+};
+use esp_hal::time::Rate;
 use futures::{FutureExt, select_biased};
+use static_cell::StaticCell;
 
 use crate::cmd::{ServoCmdSignal, StopCmdSub};
 
-/// Convert angle (0–180°) to PWM pulse width in microseconds.
-/// Power HD LW-30MG: center pulse = 1520µs, ±1000µs range.
-/// 520µs = 0°, 1520µs = 90°, 2520µs = 180°.
-fn angle_to_pulse_us(angle: u8) -> u64 {
-    520 + angle.min(180) as u64 * 2000 / 180
+// Static storage so Ledc and Timer outlive the task future (no self-referential borrow).
+static LEDC_INST:  StaticCell<ledc::Ledc<'static>>              = StaticCell::new();
+static LEDC_TIMER: StaticCell<ledc::timer::Timer<'static, LowSpeed>> = StaticCell::new();
+
+/// Convert servo angle (0–180°) to a 14-bit LEDC duty count.
+///
+/// Power HD LW-30MG: 0° → 520µs, 90° → 1520µs, 180° → 2520µs, period = 20 000µs.
+/// 14-bit resolution = 16 384 counts → duty = pulse_us * 16 384 / 20 000.
+fn angle_to_duty(angle: u8) -> u16 {
+    let pulse_us = 520u32 + angle.min(180) as u32 * 2000 / 180;
+    (pulse_us * 16_384 / 20_000) as u16
 }
 
 #[embassy_executor::task]
 pub async fn servo_task(
-    cmd_sig: &'static ServoCmdSignal,
-    mut stop_sub: StopCmdSub,
-    mut pin: Output<'static>,
+    cmd_sig:         &'static ServoCmdSignal,
+    mut stop_sub:    StopCmdSub,
+    ledc_peripheral: esp_hal::peripherals::LEDC<'static>,
+    servo_pin:       esp_hal::peripherals::GPIO9<'static>,
 ) {
-    // Home the servo to 180° on startup before accepting any commands.
-    // Hold for ~500 ms (25 × 20 ms cycles) so it physically reaches the position.
-    let mut angle: u8 = 180;
-    for _ in 0..25u8 {
-        let pulse_us = angle_to_pulse_us(angle);
-        pin.set_high();
-        Timer::after_micros(pulse_us).await;
-        pin.set_low();
-        Timer::after_micros(20_000 - pulse_us).await;
-    }
+    // ── One-time LEDC hardware setup ─────────────────────────────────────────
+    // Store Ledc and Timer in statics so Channel can hold a 'static reference
+    // to the timer without creating a self-referential future.
+    let ledc = LEDC_INST.init(ledc::Ledc::new(ledc_peripheral));
+    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
 
+    let lstimer = LEDC_TIMER.init(ledc.timer::<LowSpeed>(timer::Number::Timer0));
+    lstimer
+        .configure(timer::config::Config {
+            duty:         timer::config::Duty::Duty14Bit,
+            clock_source: ledc::timer::LSClockSource::APBClk,
+            frequency:    Rate::from_hz(50), // 50 Hz = 20 ms period
+        })
+        .expect("LEDC timer configure failed");
+
+    let mut channel = ledc.channel(channel::Number::Channel0, servo_pin);
+    channel
+        .configure(channel::config::Config {
+            timer:      lstimer,
+            duty_pct:   0,
+            drive_mode: esp_hal::gpio::DriveMode::PushPull,
+        })
+        .expect("LEDC channel configure failed");
+
+    // Home to 180° (closed) and hold for 500 ms
+    channel.set_duty_cycle(angle_to_duty(180)).ok();
+    embassy_time::Timer::after_millis(500).await;
+
+    log::info!("Servo ready (hardware LEDC PWM at 50 Hz)\r");
+
+    // ── Command loop ─────────────────────────────────────────────────────────
     loop {
-        let pulse_us = angle_to_pulse_us(angle);
-
-        // High pulse — bail early on stop
-        pin.set_high();
         select_biased! {
-            _ = Timer::after_micros(pulse_us).fuse() => {},
             _ = stop_sub.next_message_pure().fuse() => {
-                pin.set_low();
-                continue;
+                // On stop return to safe closed position
+                channel.set_duty_cycle(angle_to_duty(180)).ok();
+                crate::CURRENT_SERVO_ANGLE.store(180, portable_atomic::Ordering::Relaxed);
             },
-        }
-        pin.set_low();
-
-        // Rest of 20ms period — accept new angle command or stop
-        select_biased! {
-            _ = Timer::after_micros(20_000 - pulse_us).fuse() => {},
-            _ = stop_sub.next_message_pure().fuse() => {},
             cmd = cmd_sig.receive().fuse() => {
-                angle = cmd.into_inner().angle;
+                let angle = cmd.into_inner().angle;
+                channel.set_duty_cycle(angle_to_duty(angle)).ok();
+                crate::CURRENT_SERVO_ANGLE.store(angle as i32, portable_atomic::Ordering::Relaxed);
             },
         }
     }

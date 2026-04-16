@@ -45,6 +45,7 @@ impl HomingState {
             stepper.curr_pos().abs() / crate::MICROSTEPS as i32
         );
         stepper.set_curr_pos(0);
+        crate::STEPPER_X_POS.store(0, Ordering::Relaxed);
 
         let mut res =
             move_to_end_switch(Dir::Positive, stepper, emergency_stop_sig, end_switch_sig).await;
@@ -237,7 +238,10 @@ pub async fn stepper_task(
                     }
                 }
             },
-            _ = stepper.run_to_pos_with_accel_speed(pos, cfg).fuse() => ()
+            _ = stepper.run_to_pos_with_accel_speed(pos, cfg).fuse() => {
+                // Update the shared stepper position for servo forbidden zone checking
+                crate::STEPPER_X_POS.store(pos, Ordering::Relaxed);
+            }
         };
     }
 }

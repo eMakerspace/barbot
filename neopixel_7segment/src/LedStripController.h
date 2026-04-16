@@ -33,10 +33,21 @@ public:
     // -----------------------------------------------------------------------
     void setIdle();
     void setOff();
+    void setStrobe();
     void setBrightness(uint8_t brightness);
+    void setMoving();
+    void setPouring();
+    void setMixing();
+    void setDone();
+    void setCupWait();
+    void setDrinkReady();
+    void setOverdueStrobe();
+    void setSolid(const CRGB &color);
+    void setFlash(const CRGB &color, uint16_t onMs = 100, uint16_t offMs = 100);
+    void setPulse(const CRGB &color, uint16_t periodMs = 1200);
 
 private:
-    enum class Mode : uint8_t { Idle, Off };
+    enum class Mode : uint8_t { Idle, Off, Strobe, Moving, Pouring, Mixing, Done, CupWait, DrinkReady, OverdueStrobe, Solid, Flash, Pulse };
 
     CRGB     leds_[cfg::LED_COUNT];
     Mode     mode_      = Mode::Idle;
@@ -44,6 +55,11 @@ private:
     SegState ring_;
     SegState u_;
     uint32_t lastFrame_ = 0;
+    uint32_t animStart_ = 0;   // time when current animation mode started
+    CRGB     effectColor_ = CRGB::Black;
+    uint16_t flashOnMs_ = 100;
+    uint16_t flashOffMs_ = 100;
+    uint16_t pulsePeriodMs_ = 1200;
 
     // -----------------------------------------------------------------------
     // Idle animation phases — BAR (indices 0–6)
@@ -69,6 +85,17 @@ private:
     void animUFill        (uint32_t t);   // 10 – fills from both ends toward bottom
     void animUBounce      (uint32_t t);   // 11 – comet bounces along U path
     void animUMeteor      (uint32_t t);   // 12 – meteors rain down both legs
+
+    // -----------------------------------------------------------------------
+    // Activity animation updates
+    // -----------------------------------------------------------------------
+    void updateMoving();
+    void updatePouring();
+    void updateMixing();
+    void updateDone();
+    void updateCupWait();
+    void updateDrinkReady();
+    void updateOverdueStrobe();
 
     // -----------------------------------------------------------------------
     // Internal helpers

@@ -8,11 +8,11 @@ use crate::cmd::{PumpCmd, PumpCmdSignal, ScaleCmdSignal, StopCmd, StopCmdSub};
 
 // ---------------------------------------------------------------------------
 // Calibration factor: raw counts per gram.
-// Calibrated: 27.06 counts/gram (measured 136g actual vs 9.2g reported at 400.0 default).
-// Stored as f32 bits in an AtomicU32 for safe cross-task access.
+// Calibration is persisted by the host (Raspberry Pi) in hardware_config.json
+// and restored at boot via G3.3 F{factor}.
 // ---------------------------------------------------------------------------
-const DEFAULT_COUNTS_PER_GRAM: u32 = (27.06_f32).to_bits();
-static COUNTS_PER_GRAM: AtomicU32 = AtomicU32::new(DEFAULT_COUNTS_PER_GRAM);
+const DEFAULT_COUNTS_PER_GRAM: f32 = 27.06;
+static COUNTS_PER_GRAM: AtomicU32 = AtomicU32::new(DEFAULT_COUNTS_PER_GRAM.to_bits());
 
 fn get_counts_per_gram() -> f32 {
     f32::from_bits(COUNTS_PER_GRAM.load(Ordering::Relaxed))
@@ -130,8 +130,10 @@ pub async fn scale_task(
     // Startup probe
     if wait_data_ready(&data, 2000).await {
         log::info!("HX711 detected, scale ready\r");
+        crate::led::set_error(crate::led::ErrorState::Ok);
     } else {
         log::error!("HX711 not detected! Check wiring (DATA=GPIO8, CLK=GPIO10)\r");
+        crate::led::set_error(crate::led::ErrorState::HX711NotDetected);
     }
 
     loop {
@@ -170,13 +172,18 @@ pub async fn scale_task(
                             let cpg = tared / known_grams;
                             set_counts_per_gram(cpg);
                             log::info!(
-                                "Calibrated: {:.2} counts/gram (tared counts={:.0}, known={:.1}g)\r",
+                                "Calibrated: {:.4} counts/gram (tared counts={:.0}, known={:.1}g)\r",
                                 cpg, tared, known_grams
                             );
                         }
                     }
                     None => log::error!("HX711 not responding, cannot calibrate\r"),
                 }
+            }
+
+            crate::cmd::ScaleCmd::SetFactor { factor } => {
+                set_counts_per_gram(factor);
+                log::info!("Scale calibration restored: {:.4} counts/gram\r", factor);
             }
 
             crate::cmd::ScaleCmd::Debug { samples } => {
@@ -245,6 +252,20 @@ const OUTLIER_TREND_COUNT: usize = 8;
 /// Allow this many consecutive HX711 read failures before aborting the fill.
 const MAX_HX711_ERRORS: u32 = 5;
 
+/// If weight change is less than this amount (grams), count it as no progress.
+const MIN_WEIGHT_CHANGE_G: f32 = 0.5;
+
+/// If no significant weight change for this many consecutive samples, abort (empty/blocked).
+const NO_PROGRESS_LIMIT: u32 = 25;
+
+/// Pump rate monitoring: check dispensing rate over a sliding 30-sample window.
+const PUMP_RATE_WINDOW_SAMPLES: usize = 30;
+const MIN_WEIGHT_CHANGE_PER_WINDOW_G: f32 = 25.0;
+
+/// Maximum fill duration in milliseconds before aborting (safety net for empty bottles,
+/// blocked tubing, or scale failure).
+const FILL_TIMEOUT_MS: u64 = 30_000;
+
 async fn fill_loop(
     pump_sig: &'static PumpCmdSignal,
     stop_sub: &mut StopCmdSub,
@@ -254,9 +275,15 @@ async fn fill_loop(
     pump_index: u8,
     target_grams: f32,
 ) {
+    if target_grams <= 0.0 {
+        log::info!("[FILL_END] reason=zero_target dispensed=0.0g duration=0ms\r");
+        return;
+    }
+
     let cpg = get_counts_per_gram();
     if cpg < 1.0 {
         log::error!("Scale not calibrated. Run G3.2 W{{grams}} first.\r");
+        crate::led::set_error(crate::led::ErrorState::ScaleNotCalibrated);
         return;
     }
 
@@ -287,11 +314,31 @@ async fn fill_loop(
 
     let mut done = false;
     let mut consecutive_errors: u32 = 0;
+    let mut last_dispensed_g: f32 = 0.0;
+    let mut last_reported_weight: f32 = baseline;
+    let mut no_progress_count: u32 = 0;
     // Ring buffer of recent outlier readings, used for trend detection.
     let mut outlier_buf = [0.0f32; OUTLIER_TREND_COUNT];
     let mut outlier_count: usize = 0;
+    // Ring buffer for pump dispensing rate monitoring (15-sample window).
+    let mut weight_history = [0.0f32; PUMP_RATE_WINDOW_SAMPLES];
+    let mut history_idx = 0;
+    let mut history_count = 0;
 
     loop {
+        // Hard timeout — catches empty bottles, blocked tubing, or scale failure.
+        let t_ms = start.elapsed().as_millis();
+        if t_ms >= FILL_TIMEOUT_MS {
+            pump_sig
+                .send(PumpCmd { index: pump_index, duration_ms: 0, wait: false })
+                .await;
+            crate::led::set_error(crate::led::ErrorState::FillTimeout);
+            log::warn!(
+                "[FILL_END] reason=timeout dispensed={:.1}g duration={}ms\r",
+                last_dispensed_g, t_ms
+            );
+            break;
+        }
         // Wait for next HX711 reading OR emergency stop, whichever comes first.
         // Cancelling the read future mid-way is safe — Embassy drops it cleanly.
         let raw_opt = select_biased! {
@@ -320,6 +367,7 @@ async fn fill_loop(
                 pump_sig
                     .send(PumpCmd { index: pump_index, duration_ms: 0, wait: false })
                     .await;
+                crate::led::set_error(crate::led::ErrorState::HX711ReadError);
                 log::error!("[FILL_END] reason=hx711_error\r");
                 break;
             }
@@ -328,7 +376,6 @@ async fn fill_loop(
 
         consecutive_errors = 0;
 
-        let t_ms = start.elapsed().as_millis();
         let weight_g = (raw - tare_offset) as f32 / cpg;
 
         // Outlier check: reject brief spikes/dips (EMI, vibration, raw=-1 sentinel).
@@ -373,18 +420,61 @@ async fn fill_loop(
 
         let filtered_g = kalman.update(weight_g);
         let delta_g = filtered_g - baseline; // negative as bottle empties
+        last_dispensed_g = -delta_g;
 
         log::info!("{},{},{:.2},{:.2}\r", t_ms, raw, filtered_g, delta_g);
 
+        // Check if weight is progressing (changing significantly)
+        if (filtered_g - last_reported_weight).abs() < MIN_WEIGHT_CHANGE_G {
+            no_progress_count += 1;
+            if no_progress_count >= NO_PROGRESS_LIMIT {
+                pump_sig
+                    .send(PumpCmd { index: pump_index, duration_ms: 0, wait: false })
+                    .await;
+                crate::led::set_error(crate::led::ErrorState::PumpBlocked);
+                log::error!(
+                    "[FILL_END] reason=empty_or_blocked dispensed={:.1}g duration={}ms (no weight change for {} samples)\r",
+                    last_dispensed_g, t_ms, no_progress_count
+                );
+                break;
+            }
+        } else {
+            // Weight changed significantly, reset counter
+            no_progress_count = 0;
+            last_reported_weight = filtered_g;
+        }
+
+        // Pump rate monitoring: check if dispensing rate is adequate over 15-sample window.
+        weight_history[history_idx % PUMP_RATE_WINDOW_SAMPLES] = filtered_g;
+        history_idx += 1;
+        if history_count < PUMP_RATE_WINDOW_SAMPLES {
+            history_count += 1;
+        }
+
+        if history_count >= PUMP_RATE_WINDOW_SAMPLES {
+            let oldest_weight = weight_history[history_idx % PUMP_RATE_WINDOW_SAMPLES];
+            let weight_change = (oldest_weight - filtered_g).abs(); // Should be positive as weight decreases
+            if weight_change < MIN_WEIGHT_CHANGE_PER_WINDOW_G {
+                pump_sig
+                    .send(PumpCmd { index: pump_index, duration_ms: 0, wait: false })
+                    .await;
+                crate::led::set_error(crate::led::ErrorState::PumpFailure);
+                log::error!(
+                    "[FILL_END] reason=pump_failure dispensed={:.1}g duration={}ms (insufficient dispensing rate: {:.1}g change in {} samples)\r",
+                    last_dispensed_g, t_ms, weight_change, PUMP_RATE_WINDOW_SAMPLES
+                );
+                break;
+            }
+        }
+
         // Weight decreased by target amount? (delta is negative, so check -delta)
-        if -delta_g >= stop_threshold {
+        if last_dispensed_g >= stop_threshold {
             pump_sig
                 .send(PumpCmd { index: pump_index, duration_ms: 0, wait: false })
                 .await;
             log::info!(
                 "[FILL_END] reason=target_reached dispensed={:.1}g duration={}ms\r",
-                -delta_g,
-                t_ms
+                last_dispensed_g, t_ms
             );
             break;
         }

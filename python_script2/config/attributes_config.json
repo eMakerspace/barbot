@@ -1,6 +1,215 @@
 {
-    "attribute_ids": {},
-    "attribute_slugs": {},
-    "term_slugs": {},
-    "bottle_properties": {}
+    "attribute_ids": {
+        "pa_depot-inklusiv": 5,
+        "pa_mixers": 2,
+        "pa_mixers-amount": 4,
+        "pa_spirits": 1,
+        "pa_spirits-amount": 3
+    },
+    "attribute_slugs": {
+        "Depot inklusiv": "pa_depot-inklusiv",
+        "Mixers": "pa_mixers",
+        "Mixers Amount": "pa_mixers-amount",
+        "Spirits": "pa_spirits",
+        "Spirits Amount": "pa_spirits-amount"
+    },
+    "term_slugs": {
+        "pa_depot-inklusiv": {
+            "Ja": "ja",
+            "Kein Depot": "kein-depot",
+            "Nein": "nein"
+        },
+        "pa_mixers": {
+            "Ananassaft": "ananassaft",
+            "Bitter Lemon": "bitter-lemon",
+            "Citro": "citro",
+            "Cola": "cola",
+            "Ginger Ale": "ginger-ale",
+            "Ice Tea": "ice-tea",
+            "Orangensaft": "orangensaft",
+            "Tonic Water": "tonic-water"
+        },
+        "pa_mixers-amount": {
+            "17 cl": "17",
+            "19 cl": "19",
+            "21 cl": "21"
+        },
+        "pa_spirits": {
+            "Gin": "gin",
+            "J\u00e4germeister": "jaegermeister",
+            "Malibu": "malibu",
+            "Rum": "rum",
+            "Tequila": "tequila",
+            "Trojka Green": "trojka-green",
+            "Trojka Red": "trojka-red",
+            "Vodka": "vodka",
+            "Whisky": "whisky"
+        },
+        "pa_spirits-amount": {
+            "2 cl": "2",
+            "4 cl": "4"
+        }
+    },
+    "bottle_properties": {
+        "pa_depot-inklusiv": {
+            "ja": {
+                "id": 40,
+                "name": "Ja",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "kein-depot": {
+                "id": 42,
+                "name": "Kein Depot",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "nein": {
+                "id": 41,
+                "name": "Nein",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            }
+        },
+        "pa_mixers": {
+            "ananassaft": {
+                "id": 39,
+                "name": "Ananassaft",
+                "bottle_size": 100.0,
+                "viscosity": 0.5
+            },
+            "bitter-lemon": {
+                "id": 33,
+                "name": "Bitter Lemon",
+                "bottle_size": 100.0,
+                "viscosity": 2.9
+            },
+            "citro": {
+                "id": 30,
+                "name": "Citro",
+                "bottle_size": 150.0,
+                "viscosity": 1.0
+            },
+            "cola": {
+                "id": 28,
+                "name": "Cola",
+                "bottle_size": 150.0,
+                "viscosity": 1.0
+            },
+            "ginger-ale": {
+                "id": 38,
+                "name": "Ginger Ale",
+                "bottle_size": 100.0,
+                "viscosity": 2.9
+            },
+            "ice-tea": {
+                "id": 29,
+                "name": "Ice Tea",
+                "bottle_size": 150.0,
+                "viscosity": 1.0
+            },
+            "orangensaft": {
+                "id": 32,
+                "name": "Orangensaft",
+                "bottle_size": 100.0,
+                "viscosity": 1.0
+            },
+            "tonic-water": {
+                "id": 31,
+                "name": "Tonic Water",
+                "bottle_size": 100.0,
+                "viscosity": 2.2
+            }
+        },
+        "pa_mixers-amount": {
+            "17": {
+                "id": 43,
+                "name": "17 cl",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "19": {
+                "id": 37,
+                "name": "19 cl",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "21": {
+                "id": 36,
+                "name": "21 cl",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            }
+        },
+        "pa_spirits": {
+            "gin": {
+                "id": 23,
+                "name": "Gin",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "jaegermeister": {
+                "id": 27,
+                "name": "J\u00e4germeister",
+                "bottle_size": 100.0,
+                "viscosity": 1.0
+            },
+            "malibu": {
+                "id": 44,
+                "name": "Malibu",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "rum": {
+                "id": 22,
+                "name": "Rum",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "tequila": {
+                "id": 24,
+                "name": "Tequila",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "trojka-green": {
+                "id": 26,
+                "name": "Trojka Green",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "trojka-red": {
+                "id": 25,
+                "name": "Trojka Red",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "vodka": {
+                "id": 21,
+                "name": "Vodka",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "whisky": {
+                "id": 45,
+                "name": "Whisky",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            }
+        },
+        "pa_spirits-amount": {
+            "2": {
+                "id": 35,
+                "name": "2 cl",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            },
+            "4": {
+                "id": 34,
+                "name": "4 cl",
+                "bottle_size": 70.0,
+                "viscosity": 1.0
+            }
+        }
+    }
 }

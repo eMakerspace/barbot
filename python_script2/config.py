@@ -202,14 +202,33 @@ class HardwareConfig:
         self.pour_duration_ms: int = optic.get("pour_duration_ms", 1500)
         self.settle_duration_ms: int = optic.get("settle_duration_ms", 500)
         self.servo_pour_angle: int = optic.get("pour_angle", 90)
+        self.servo_close_angle: int = optic.get("close_angle", 180)
+        self.servo_settle_ms: int = optic.get("servo_settle_ms", 100)
+
+        self.x_accel: int | None = x.get("accel")
+        self.x_max_speed: int | None = x.get("max_speed")
+
+        self.forbidden_servo_zones: list[dict] = data.get("forbidden_servo_zones", [])
+        self.pump_tubing_compensation_g: float = data.get("pump_tubing_compensation_g", 0.0)
 
         ser = data.get("serial", {})
         self.serial_port: str | None = ser.get("port", None)
         self.serial_baud: int = ser.get("baud", 115200)
 
+        neo = data.get("neopixel_serial", {})
+        self.neo_port: str | None = neo.get("port", None)
+        self.neo_baud: int = neo.get("baud", 115200)
+
     @classmethod
     def load(cls, path: Path = HARDWARE_CONFIG_PATH) -> "HardwareConfig":
         return cls(load_json(path), path)
+
+    def in_forbidden_servo_zone(self, position: int) -> "str | None":
+        """Return zone label if position is forbidden for servo opening, else None."""
+        for z in self.forbidden_servo_zones:
+            if z.get("min", 0) <= position <= z.get("max", 0):
+                return z.get("label", "forbidden zone")
+        return None
 
     def position_for_slot(self, slot: str) -> int | None:
         return self.slot_positions.get(slot)
@@ -218,20 +237,34 @@ class HardwareConfig:
         self.slot_positions[slot] = steps
 
     def save(self):
+        x_axis: dict = {
+            "max_steps":     self.x_max,
+            "idle_position": self.x_idle,
+            "steps_per_mm":  self.steps_per_mm,
+        }
+        if self.x_accel is not None:
+            x_axis["accel"] = self.x_accel
+        if self.x_max_speed is not None:
+            x_axis["max_speed"] = self.x_max_speed
+
         save_json({
-            "x_axis": {
-                "max_steps":      self.x_max,
-                "idle_position":  self.x_idle,
-                "steps_per_mm":   self.steps_per_mm,
-            },
+            "x_axis": x_axis,
             "slot_positions": self.slot_positions,
+            "pump_tubing_compensation_g": self.pump_tubing_compensation_g,
             "spirit_optic": {
-                "pour_duration_ms":  self.pour_duration_ms,
+                "pour_duration_ms":   self.pour_duration_ms,
                 "settle_duration_ms": self.settle_duration_ms,
-                "pour_angle":        self.servo_pour_angle,
+                "pour_angle":         self.servo_pour_angle,
+                "close_angle":        self.servo_close_angle,
+                "servo_settle_ms":    self.servo_settle_ms,
             },
+            "forbidden_servo_zones": self.forbidden_servo_zones,
             "serial": {
                 "port": self.serial_port,
                 "baud": self.serial_baud,
+            },
+            "neopixel_serial": {
+                "port": self.neo_port,
+                "baud": self.neo_baud,
             },
         }, self._path)

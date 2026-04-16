@@ -11,10 +11,12 @@ use log::info;
 use stepper::Stepper;
 
 use crate::cmd::{CmdChannel, ScaleCmdSignal, ServoCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
+use portable_atomic::AtomicI32;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 pub mod cmd;
+pub mod led;
 pub mod rmt;
 pub mod stepgen;
 pub mod stepper;
@@ -25,6 +27,10 @@ extern crate alloc;
 
 // Microstepping factor: hardware is configured for 1/4 steps.
 pub const MICROSTEPS: f64 = 4.0;
+
+// Safety margin near slot 4/5 where servo opening is allowed.
+// Forbidden zone is only the middle span between slots after this margin.
+pub const SERVO_ZONE_BUFFER: i32 = 25;
 
 pub const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
     .with_acceleration(3000.0 * MICROSTEPS)
@@ -40,6 +46,14 @@ static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static PUMP_CMD_SIG: PumpCmdSignal = PumpCmdSignal::new();
 static SERVO_CMD_SIG: ServoCmdSignal = ServoCmdSignal::new();
 static SCALE_CMD_SIG: ScaleCmdSignal = ScaleCmdSignal::new();
+// Track current stepper X position for servo forbidden zone checking
+static STEPPER_X_POS: AtomicI32 = AtomicI32::new(0);
+// Slot 4 and 5 positions sent by the Pi at boot for forbidden zone calculation.
+// i32::MIN means "not configured" — servo blocking is disabled until set.
+static SLOT4_POS: AtomicI32 = AtomicI32::new(i32::MIN);
+static SLOT5_POS: AtomicI32 = AtomicI32::new(i32::MIN);
+// Track current servo angle (0-180°). Starts at 180° (safe/closed).
+static CURRENT_SERVO_ANGLE: AtomicI32 = AtomicI32::new(180);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -74,14 +88,11 @@ async fn main(spawner: Spawner) {
         STOP_CHANNEL.publisher().unwrap(),
     ));
 
-    let emergency_stop = Input::new(
+    let cup_sensor = Input::new(
         peripherals.GPIO2,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
-    spawner.must_spawn(tasks::emergency_stop_monitor(
-        emergency_stop,
-        STOP_CHANNEL.immediate_publisher(),
-    ));
+    spawner.must_spawn(tasks::cup_presence_monitor(cup_sensor));
     
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
@@ -140,7 +151,8 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(tasks::servo::servo_task(
         &SERVO_CMD_SIG,
         STOP_CHANNEL.subscriber().unwrap(),
-        Output::new(peripherals.GPIO9, esp_hal::gpio::Level::Low, pump_pin_cfg),
+        peripherals.LEDC,
+        peripherals.GPIO9,
     ));
 
     // HX711 scale: DATA on GPIO8, CLK on GPIO10

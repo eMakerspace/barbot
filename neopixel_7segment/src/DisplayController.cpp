@@ -46,6 +46,7 @@ constexpr uint32_t PHASE_DUR_STROBE_ACCEL      = 20000;
 constexpr uint32_t PHASE_DUR_SEGMENT_MORPH     = 30000;
 constexpr uint32_t PHASE_DUR_CASCADE_ACROSS    = 30000;
 constexpr uint32_t PHASE_DUR_SNAKE             = 35000;  // NEW: snake moving around perimeter
+constexpr uint32_t PHASE_DUR_SNAKE_EATS_DOT    = 30000;  // NEW: 3-link snake chases 1-link prey
 // ============================================================================
 
 // Assemble durations array
@@ -67,10 +68,11 @@ static constexpr uint32_t PHASE_DUR[] = {
     PHASE_DUR_SEGMENT_MORPH,
     PHASE_DUR_CASCADE_ACROSS,
     PHASE_DUR_SNAKE,
+    PHASE_DUR_SNAKE_EATS_DOT,
 };
-static constexpr int NUM_PHASES = 17;
-// Total cycle: sum of all durations above ≈ 440 s = 7 min 20 s
-static constexpr uint32_t TOTAL_CYCLE_MS = 440000;
+static constexpr int NUM_PHASES = 18;
+// Total cycle: sum of all durations above ≈ 470 s = 7 min 50 s
+static constexpr uint32_t TOTAL_CYCLE_MS = 470000;
 
 // ---------------------------------------------------------------------------
 // Public mode setters
@@ -106,16 +108,30 @@ void DisplayController::setCup() {
     modeStart_ = millis();
 }
 
+void DisplayController::setCounting(uint32_t takt_ms) {
+    mode_      = Mode::Counting;
+    taktMs_    = takt_ms;
+    modeStart_ = millis();
+}
+
+void DisplayController::setDrinkReady(uint8_t v) {
+    mode_         = Mode::DrinkReady;
+    displayValue_ = v % 100;
+    modeStart_    = millis();
+}
+
 // ---------------------------------------------------------------------------
 // Main tick
 // ---------------------------------------------------------------------------
 void DisplayController::tick() {
     switch (mode_) {
-        case Mode::Static:    updateStatic();    break;
-        case Mode::Blinking:  updateBlinking();  break;
-        case Mode::Breathing: updateBreathing(); break;
-        case Mode::Animating: updateAnimating(); break;
-        case Mode::Cup:       updateCup();       break;
+        case Mode::Static:     updateStatic();     break;
+        case Mode::Blinking:   updateBlinking();   break;
+        case Mode::Breathing:  updateBreathing();  break;
+        case Mode::Animating:  updateAnimating();  break;
+        case Mode::Cup:        updateCup();        break;
+        case Mode::Counting:   updateCounting();   break;
+        case Mode::DrinkReady: updateDrinkReady(); break;
     }
 }
 
@@ -180,9 +196,44 @@ void DisplayController::updateBreathing() {
 //   900 ms     U-shape (b+c+d+e+f)     cup lands — rapid flash on impact
 //   900–1000   landing flash (PWM)
 //   1000–3000  hold U-shape
+// ---------------------------------------------------------------------------
+// Counting: 00 → 99 → 00, one step every taktMs_
+// Steps 0–99 count up; steps 100–198 count back down.
+// Total cycle = 199 × taktMs_ (at 400 ms: ~79.6 s)
+// ---------------------------------------------------------------------------
+void DisplayController::updateCounting() {
+    uint32_t t    = millis() - modeStart_;
+    uint32_t step = (t / taktMs_) % 199;   // 0..198 ping-pong
+    uint8_t  val  = (step < 100) ? (uint8_t)step : (uint8_t)(198 - step);
+    driver_.setOnes(val % 10);
+    driver_.setTens(val / 10);
+    driver_.setBrightnessOnes(255);
+    driver_.setBrightnessTens(255);
+}
+
 //   3000–4500  U-shape fades out (PWM)
 //   4500–5000  blank pause
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// DrinkReady: order number blinks slow→fast over a 5s cycle, looping.
+// Period ramps from 800ms down to 80ms linearly within each cycle.
+// ---------------------------------------------------------------------------
+void DisplayController::updateDrinkReady() {
+    uint32_t t  = millis() - modeStart_;
+    uint32_t pt = t % 5000;  // position within 5s cycle
+
+    // Linear ramp: 800ms period at start → 80ms at end of cycle
+    uint32_t period = 800 - (uint32_t)(720UL * pt / 5000);
+    if (period < 80) period = 80;
+
+    uint8_t br = (t % period < period / 2) ? 255 : 0;
+    driver_.setOnes(displayValue_ % 10);
+    driver_.setTens(displayValue_ / 10);
+    driver_.setBrightnessOnes(br);
+    driver_.setBrightnessTens(br);
+}
+
 void DisplayController::updateCup() {
     constexpr uint32_t CYCLE = 5000;
     uint32_t t = (millis() - modeStart_) % CYCLE;
@@ -268,6 +319,7 @@ void DisplayController::updateAnimating() {
         case 14: phaseSegmentMorph     (t); break;
         case 15: phaseCascadeAcross    (t); break;
         case 16: phaseSnake            (t); break;
+        case 17: phaseSnakeEatsDot     (t); break;
     }
 }
 
@@ -552,4 +604,62 @@ void DisplayController::phaseSnake(uint32_t t) {
     // Overall brightness breathes gently to enhance motion perception
     uint8_t br = sinBright(t, 3500, 200, 255);
     show(maskOnes, maskTens, br, br);
+}
+
+// Phase 17 – Snake eats dot  (30 s)
+// A 3-link snake (head + 2 body links) chases a 1-link dot on a continuous
+// 12-position perimeter path (6 positions on ones + 6 on tens). When the
+// head catches the dot, the dot respawns ahead and the chase repeats.
+void DisplayController::phaseSnakeEatsDot(uint32_t t) {
+    // Same clockwise perimeter mapping used by phaseSnake.
+    static constexpr uint8_t SEGS[6] = { SEG_A, SEG_B, SEG_C, SEG_D, SEG_E, SEG_F };
+    constexpr int PATH_LEN = 12;
+    constexpr uint32_t STEP_MS = 140;
+    constexpr int PREY_MOVE_EVERY = 3; // prey moves slower than snake
+
+    int head = 0;
+    int prey = 6; // start opposite side
+    bool justAte = false;
+    int steps = (int)(t / STEP_MS);
+
+    for (int s = 0; s < steps; s++) {
+        justAte = false;
+        head = (head + 1) % PATH_LEN;
+
+        if ((s % PREY_MOVE_EVERY) == 0) {
+            prey = (prey + 1) % PATH_LEN;
+        }
+
+        if (head == prey) {
+            // Respawn prey ahead of the snake so the next chase restarts quickly.
+            prey = (head + 5 + (s % 3)) % PATH_LEN;
+            justAte = true;
+        }
+    }
+
+    int snake1 = (head - 1 + PATH_LEN) % PATH_LEN;
+    int snake2 = (head - 2 + PATH_LEN) % PATH_LEN;
+
+    uint8_t onesMask = 0;
+    uint8_t tensMask = 0;
+
+    auto addPos = [&](int pos) {
+        if (pos < 6) {
+            onesMask |= SEGS[pos];
+        } else {
+            tensMask |= SEGS[pos - 6];
+        }
+    };
+
+    addPos(head);
+    addPos(snake1);
+    addPos(snake2);
+    addPos(prey);
+
+    // Quick flash right after an "eat" event to make the collision visible.
+    uint8_t br = 255;
+    if (justAte && ((t / 40) % 2 == 0)) {
+        br = 40;
+    }
+    show(onesMask, tensMask, br, br);
 }

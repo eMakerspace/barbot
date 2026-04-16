@@ -2,7 +2,6 @@ use embassy_time::Timer;
 use esp_hal::gpio::{Input, Level};
 use futures::{FutureExt, select_biased};
 
-use crate::cmd::{StopCmd, StopCmdImmediatePub};
 
 pub mod servo;
 pub mod pump;
@@ -12,37 +11,34 @@ pub mod serial;
 pub mod stepper;
 
 #[embassy_executor::task]
-pub async fn emergency_stop_monitor(
-    mut emergency_stop: Input<'static>,
-    stop_pub: StopCmdImmediatePub,
+pub async fn cup_presence_monitor(
+    mut cup_sensor: Input<'static>,
 ) {
-    let mut stop_active = false;
-    let mut stop_clearing = false;
+    let mut last_state = cup_sensor.level();
+    // Emit initial state so the Pi can sync _cup_present on boot
+    if last_state == Level::Low {
+        log::info!("[cup] PRESENT\r");
+    } else {
+        log::info!("[cup] ABSENT\r");
+    }
+    log::info!("Cup presence sensor initialized\r");
+
     loop {
         select_biased! {
-            _ = emergency_stop.wait_for_any_edge().fuse() => (),
-            _ = Timer::after_millis(if stop_clearing { 10 } else { 1000 }).fuse() => (),
+            _ = cup_sensor.wait_for_any_edge().fuse() => (),
+            _ = Timer::after_millis(100).fuse() => (),
         }
 
-        let level = emergency_stop.level();
+        let current_state = cup_sensor.level();
 
-        match level {
-            Level::Low if !stop_active || stop_clearing => {
-                stop_pub.publish_immediate(StopCmd::Immediate);
-                stop_active = true;
-                stop_clearing = false;
-                log::warn!("Emergency stop!\r");
+        // Report state changes (LOW = cup present, HIGH = cup absent)
+        if current_state != last_state {
+            if current_state == Level::Low {
+                log::info!("[cup] PRESENT\r");
+            } else {
+                log::info!("[cup] ABSENT\r");
             }
-            Level::High if stop_active => {
-                if let Ok(_) = stop_pub.try_publish(StopCmd::Continue) {
-                    stop_active = false;
-                    stop_clearing = false;
-                    log::info!("Emergency stop cleared\r");
-                } else {
-                    stop_clearing = true;
-                }
-            }
-            _ => (),
+            last_state = current_state;
         }
     }
 }

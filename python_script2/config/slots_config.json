@@ -2,16 +2,13 @@
     "poll_interval_seconds": 5,
     "slot_mapping": {
         "Slot_1": "gin",
-        "Slot_2": "rum",
         "Slot_3": "tequila",
         "Slot_4": "trojka-green",
         "Slot_5": "trojka-red",
-        "Slot_6": "vodka",
         "Slot_7": "",
-        "Slot_8": "jaegermeister",
-        "Slot_A": "tonic-water",
         "Slot_B": "bitter-lemon",
-        "Slot_C": "cola",
-        "Slot_D": "orangensaft"
+        "Slot_D": "orangensaft",
+        "Slot_2": "vodka",
+        "Slot_A": "cola"
     }
 }

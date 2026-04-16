@@ -16,6 +16,7 @@ Controls:
 
 import threading
 import time
+import sys
 
 import RPi.GPIO as GPIO
 
@@ -27,6 +28,7 @@ from inventory import InventoryManager
 from orders import OrderProcessor
 from lcd import LcdDisplay, COLS, ROWS
 from encoder import RotaryEncoder
+from logger import log_debug, log_info, log_warn, log_error, log_critical
 
 # ── GPIO pin assignments ──────────────────────────────────────
 GPIO_CLK = 27   # BCM (BOARD 13)
@@ -37,6 +39,11 @@ VISIBLE  = 3    # item rows; row 0 is always the header
 
 SPINNER  = ('|', '/', '-', '\\')
 ARROW    = '>'      # selection indicator (works in all charmaps)
+
+# ── PIN Lock feature toggle ───────────────────────────────────
+# Set to False to disable PIN lock, True to enable it
+ENABLE_PIN_LOCK = False
+PIN_CODE = '6969'
 
 # ── Layout constants ──────────────────────────────────────────
 # Each menu row: SEL(1) SP(1) LABEL(16) HINT(2) = 20
@@ -88,8 +95,14 @@ class LCDMenu:
         self._nav:   list = []     # parallel [cursor, scroll] per stack entry
 
         # ── Mode ─────────────────────────────────────────────
-        # 'menu' | 'info' | 'working' | 'confirm' | 'run' | 'visc_edit' | 'x_move' | 'num_entry' | 'teach'
+        # 'menu' | 'info' | 'working' | 'confirm' | 'run' | 'visc_edit'
+        # | 'x_move' | 'num_entry' | 'teach' | 'mixing' | 'pin_lock'
         self._mode = 'menu'
+        self._locked = True
+        self._pin_entry: list[str] = []
+        self._pin_cur = 0
+        self._pin_error_until = 0.0
+        self._last_activity = time.time()
 
         # visc_edit state
         self._vedit_bottle = ''
@@ -143,11 +156,17 @@ class LCDMenu:
         self._run_count            = 0
         self._run_last_id          = None
         self._run_backlight_until  = 0.0   # epoch time; backlight on while now < this
+        self._polling_paused       = False # pause polling when error occurs
+        self._error_acked          = False # user acknowledged error
+        self._retry_drink          = False # retry failed drink when user presses button
 
         # mixing state (shown during active drink dispensing)
         self._mix_drink_num  = 0
         self._mix_total      = 0
         self._mix_name       = ''
+
+        # cup removed / add cup state
+        self._cup_removed_time = 0.0   # time when cup_removed mode was shown
 
         # marquee (ping-pong scroll for selected row)
         self._marq_label  = ''
@@ -161,45 +180,95 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
 
     def run(self):
-        GPIO.setmode(GPIO.BCM)
-
-        self._lcd.clear()
-        self._encoder.start()
-
-        # Startup sequence (blocking)
-        self._begin_work('Homing...', self._do_homing)
-        self._wait_work()
-
-        self._normalize_slots()
-
-        self._begin_work('Fetching...', self._do_fetch)
-        self._wait_work()
-
-        # Main menu
-        self._push(self._title_main, self._items_main)
-
+        log_info("LCDUI", "LCD Menu starting...")
         try:
-            while self._alive:
-                self._render()
-                time.sleep(0.05)
+            log_info("LCDUI", "Initializing GPIO...")
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+
+            log_info("LCDUI", "Clearing LCD and starting encoder...")
+            self._lcd.clear()
+            self._encoder.start()
+
+            # If serial is unavailable (e.g. locked by barbot_web.py), show a
+            # prominent warning and wait for the user to press the encoder button
+            # before continuing in simulation mode.
+            if self.hw.serial_error:
+                log_warn("LCDUI", f"Serial error detected: {self.hw.serial_error}")
+                self._show_serial_error(self.hw.serial_error)
+
+            # Startup sequence: home first (blocking), then go straight to menu.
+            # The WooCommerce fetch runs in the background — it can take a long
+            # time (or hang) if the server is unreachable and must not block boot.
+            log_info("LCDUI", "Beginning homing sequence...")
+            self._begin_work('Homing...', self._do_homing)
+            self._wait_work()
+            log_info("LCDUI", "Homing complete")
+
+            log_info("LCDUI", "Normalizing slot mappings...")
+            self._normalize_slots()
+
+            # Fire fetch in background — errors are swallowed, user can re-fetch
+            # from Setup → Fetch once the machine is ready.
+            log_info("LCDUI", "Starting background fetch thread...")
+            threading.Thread(target=self._bg_fetch, daemon=True).start()
+
+            # Main menu
+            log_info("LCDUI", "Pushing main menu...")
+            self._push(self._title_main, self._items_main)
+            with self._lock:
+                # Engage PIN lock only if enabled
+                if ENABLE_PIN_LOCK:
+                    self._engage_pin_lock_locked(reset_to_root=True)
+
+            log_info("LCDUI", "Entering render loop...")
+            try:
+                while self._alive:
+                    self._render()
+                    time.sleep(0.05)
+            except KeyboardInterrupt:
+                log_critical("LCDUI", "KeyboardInterrupt caught in render loop")
+                raise
         except KeyboardInterrupt:
-            pass
+            log_critical("LCDUI", "KeyboardInterrupt caught, initiating cleanup...")
+            # Cleanup will happen in finally block below
         except Exception as e:
+            log_error("LCDUI", f"Exception in LCD menu: {type(e).__name__}: {e}")
             try:
                 self._lcd.clear()
                 self._write_row(0, 'Error!')
                 self._write_row(1, str(e)[:20])
                 time.sleep(2.0)
-            except Exception:
-                pass
+            except Exception as display_err:
+                log_warn("LCDUI", f"Could not display error: {display_err}")
         finally:
-            self._encoder.stop()
-            self._lcd.clear()
-            self._write_row(1, '      Goodbye!      ')
-            time.sleep(1.0)
-            self._lcd.clear()
-            self._lcd.backlight = False
-            GPIO.cleanup()
+            log_info("LCDUI", "LCD Menu cleanup starting...")
+            try:
+                log_debug("LCDUI", "Stopping encoder...")
+                self._encoder.stop()
+                log_info("LCDUI", "Encoder stopped")
+            except Exception as e:
+                log_warn("LCDUI", f"Encoder stop error: {e}")
+
+            try:
+                log_debug("LCDUI", "Clearing LCD and displaying goodbye...")
+                self._lcd.clear()
+                self._write_row(1, '      Goodbye!      ')
+                time.sleep(1.0)
+                self._lcd.clear()
+                self._lcd.backlight = False
+                log_info("LCDUI", "LCD cleared")
+            except Exception as e:
+                log_warn("LCDUI", f"LCD cleanup error: {e}")
+
+            try:
+                log_debug("LCDUI", "Cleaning up GPIO...")
+                GPIO.cleanup()
+                log_info("LCDUI", "GPIO cleanup complete")
+            except Exception as e:
+                log_warn("LCDUI", f"GPIO cleanup error: {e}")
+
+            log_critical("LCDUI", "LCD Menu shutdown complete")
 
     # ══════════════════════════════════════════════════════════
     # LCD helpers
@@ -310,9 +379,14 @@ class LCDMenu:
 
     def _on_rotate(self, d: int):
         with self._lock:
+            self._last_activity = time.time()
             m = self._mode
 
-            if m == 'run':
+            if m == 'pin_lock':
+                self._pin_cur = (self._pin_cur + d) % 10
+                self._dirty = True
+
+            elif m == 'run':
                 # Any rotation wakes the backlight for 5 seconds
                 self._run_backlight_until = time.time() + 5.0
                 self._lcd.backlight = True
@@ -380,6 +454,11 @@ class LCDMenu:
                 self._info_scroll = max(0, min(max_s, self._info_scroll + d))
                 self._dirty = True
 
+            elif m == 'error':
+                if self._polling_paused:
+                    self._retry_drink = not self._retry_drink
+                    self._dirty = True
+
             elif m == 'confirm':
                 self._conf_yn = 1 - self._conf_yn
                 self._dirty = True
@@ -389,9 +468,30 @@ class LCDMenu:
         action = None
 
         with self._lock:
+            self._last_activity = time.time()
             m = self._mode
 
-            if m == 'working':
+            if m == 'pin_lock':
+                self._pin_entry.append(str(self._pin_cur))
+                if len(self._pin_entry) >= len(PIN_CODE):
+                    entered = ''.join(self._pin_entry[:len(PIN_CODE)])
+                    if entered == PIN_CODE:
+                        self._locked = False
+                        self._pin_entry = []
+                        self._pin_cur = 0
+                        self._pin_error_until = 0.0
+                        self._mode = 'menu'
+                        self._dirty = True
+                    else:
+                        self._pin_entry = []
+                        self._pin_cur = 0
+                        self._pin_error_until = time.time() + 1.5
+                        self._dirty = True
+                else:
+                    self._pin_cur = 0
+                    self._dirty = True
+
+            elif m == 'working':
                 if self._work_done:
                     self._mode  = 'menu'
                     self._dirty = True
@@ -460,6 +560,22 @@ class LCDMenu:
                     cancel_mode='run',
                 )
 
+            elif m == 'error':
+                if self._polling_paused:
+                    # Press confirms the current RETRY/CANCEL choice and resumes polling
+                    retry = self._retry_drink
+                    self._polling_paused = False
+                    self._error_acked = True
+                    self._mode = 'run'
+                    self._dirty = True
+                    if retry:
+                        log_info("LCDUI", "User confirmed RETRY — retrying mixers")
+                    else:
+                        log_info("LCDUI", "User confirmed CANCEL — resuming polling")
+                else:
+                    self._mode = 'menu'
+                    self._dirty = True
+
             elif m == 'menu' and self._stack:
                 items = self._items_cur()
                 nav   = self._nav_cur()
@@ -472,6 +588,51 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
     # Mode helpers
     # ══════════════════════════════════════════════════════════
+
+    def _show_serial_error(self, error: str):
+        """Block on LCD until the user presses the encoder button.
+
+        Shows a flashing WARNING banner so the operator knows the machine is
+        running in simulation mode (no ESP32 connected / port locked).
+        """
+        # Pick a short 2nd-line hint based on the error type
+        if 'locked' in error.lower():
+            hint1 = 'Port locked!'
+            hint2 = 'Stop barbot_web.py'
+        elif 'configured' in error.lower():
+            hint1 = 'No port configured'
+            hint2 = 'Check hw config'
+        else:
+            hint1 = 'ESP32 unavailable'
+            hint2 = error[:20]
+
+        def _draw(flash: bool):
+            self._lcd.clear()
+            self._write_row(0, '!!!! WARNING !!!!!!!' if flash else '====================')
+            self._write_row(1, 'SIM MODE - NO ESP32 ')
+            self._write_row(2, f'{hint1:<20}')
+            self._write_row(3, f'{hint2:<20}')
+
+        pressed = threading.Event()
+        orig_press = self._encoder._on_press
+
+        def _dismiss():
+            pressed.set()
+
+        self._encoder._on_press = _dismiss
+
+        flash = True
+        while not pressed.wait(timeout=0.5):
+            _draw(flash)
+            flash = not flash
+
+        # Show static screen briefly so user sees it registered
+        _draw(False)
+        self._write_row(3, '[Press to continue] ')
+        time.sleep(1.0)
+
+        self._encoder._on_press = orig_press
+        self._lcd.clear()
 
     def _begin_work(self, title: str, fn, *args):
         """Switch to 'working' mode and run fn(*args) in a daemon thread."""
@@ -524,6 +685,23 @@ class LCDMenu:
             self._conf_cancel_mode = cancel_mode
             self._dirty            = True
 
+    def _engage_pin_lock_locked(self, *, reset_to_root: bool):
+        self._locked = True
+        self._mode = 'pin_lock'
+        self._pin_entry = []
+        self._pin_cur = 0
+        self._pin_error_until = 0.0
+        self._dirty = True
+        if reset_to_root and self._stack:
+            self._stack = self._stack[:1]
+            self._nav = self._nav[:1]
+            if self._nav:
+                self._nav[0] = [0, 0]
+            if hasattr(self, '_custom_state_stack') and self._custom_state_stack:
+                self._custom_state_stack = self._custom_state_stack[:1]
+            self._marq_label = ''
+        self._lcd.backlight = True
+
     # ══════════════════════════════════════════════════════════
     # Render dispatcher
     # ══════════════════════════════════════════════════════════
@@ -532,18 +710,22 @@ class LCDMenu:
         with self._lock:
             mode  = self._mode
             dirty = self._dirty
-            # 'working', 'run', and 'menu' always redraw
+            # 'working', 'run', 'mixing', 'menu', and 'pin_lock' always redraw
             # (menu needs it for marquee; row cache prevents redundant I2C writes)
-            if mode not in ('working', 'run', 'mixing', 'menu') and not dirty:
+            if mode not in ('working', 'run', 'mixing', 'menu', 'pin_lock', 'cup_removed', 'add_cup', 'error') and not dirty:
                 return
             self._dirty = False
 
         if   mode == 'menu':      self._draw_menu()
+        elif mode == 'pin_lock':  self._draw_pin_lock()
         elif mode == 'info':      self._draw_info()
         elif mode == 'working':   self._draw_working()
         elif mode == 'confirm':   self._draw_confirm()
         elif mode == 'run':       self._draw_run()
         elif mode == 'mixing':    self._draw_mixing()
+        elif mode == 'cup_removed': self._draw_cup_removed()
+        elif mode == 'add_cup':   self._draw_add_cup()
+        elif mode == 'error':     self._draw_error()
         elif mode == 'visc_edit': self._draw_visc_edit()
         elif mode == 'x_move':    self._draw_x_move()
         elif mode == 'num_entry': self._draw_num_entry()
@@ -674,6 +856,30 @@ class LCDMenu:
         self._write_row(2, f'  {field:<10}{val:>6}  ')
         self._write_row(3, '  [Press to confirm] ')
 
+    def _draw_pin_lock(self):
+        with self._lock:
+            entered = len(self._pin_entry)
+            cur = self._pin_cur
+            err_until = self._pin_error_until
+
+        cells = []
+        for idx in range(len(PIN_CODE)):
+            if idx < entered:
+                cells.append('*')
+            elif idx == entered:
+                cells.append(str(cur))
+            else:
+                cells.append('_')
+        pin_line = f' PIN: {" ".join(cells)}'
+
+        self._write_row(0, self._hdr('Locked'))
+        self._write_row(1, f'{pin_line:<20}'[:20])
+        self._write_row(2, ' Rotate: set digit  ')
+        if time.time() < err_until:
+            self._write_row(3, '   Incorrect PIN    ')
+        else:
+            self._write_row(3, ' Press: next digit  ')
+
     def _draw_run(self):
         with self._lock:
             count    = self._run_count
@@ -704,6 +910,64 @@ class LCDMenu:
         self._write_row(2, '                    ')
         self._write_row(3, '                    ')
 
+    def _draw_cup_removed(self):
+        """Show brief 'cup removed' confirmation (auto-clears after ~2s)."""
+        with self._lock:
+            elapsed = time.time() - self._cup_removed_time
+            if elapsed > 2.0:
+                self._mode = 'add_cup'
+                self._dirty = True
+                return
+        self._write_row(0, self._hdr('BarBot'))
+        self._write_row(1, '  Enjoy your    ')
+        self._write_row(2, '    drink!      ')
+        self._write_row(3, '                ')
+
+    def _draw_add_cup(self):
+        """Show flashing 'PUT CUP IN' prompt."""
+        flash_on = (int(time.time() * 4) % 2) == 0  # fast flash
+        self._write_row(0, self._hdr('BarBot'))
+        self._write_row(1, ' Waiting for cup ')
+        self._write_row(2, '   PUT CUP IN!   ' if flash_on else '                ')
+        self._write_row(3, '                ')
+
+    def _draw_error(self):
+        """Show error state from ESP32."""
+        with self._lock:
+            error_name = getattr(self, '_error_name', 'Unknown Error')
+            severity = getattr(self, '_error_severity', 0)
+            error_time = getattr(self, '_error_time', time.time())
+            polling_paused = self._polling_paused
+            retry_drink = self._retry_drink
+
+        elapsed = time.time() - error_time
+        severity_names = ['INFO', 'WARN', 'ERROR', 'CRITICAL']
+        sev_str = severity_names[min(severity, 3)]
+
+        # Flash for critical errors
+        flash = (int(elapsed * 2) % 2) if severity >= 3 else 0
+        header = '!!!! ERROR !!!!!!!' if flash else 'ERROR:'
+
+        self._write_row(0, header[:20])
+
+        if polling_paused:
+            # Rows 1-3: error name + side-by-side RETRY/CANCEL selector
+            r = ARROW if retry_drink else ' '
+            c = ARROW if not retry_drink else ' '
+            self._write_row(1, f'{error_name:<20}')
+            self._write_row(2, f' {r}RETRY     {c}CANCEL')
+            self._write_row(3, '   [Press confirm]  ')
+        else:
+            self._write_row(1, f'[{sev_str}]')
+            self._write_row(2, f'{error_name:<20}')
+            self._write_row(3, f'T:{elapsed:.0f}s')
+
+        # Auto-dismiss non-critical errors after 5 seconds if polling not paused
+        if severity < 3 and elapsed > 5.0 and not polling_paused:
+            with self._lock:
+                self._mode = 'menu'
+                self._dirty = True
+
     # ── Public hooks for order processor ─────────────────────────
 
     def show_mixing(self, drink_num: int, total: int, name: str):
@@ -724,6 +988,67 @@ class LCDMenu:
             self._dirty = True
         # Restore run-mode backlight behaviour (off until rotated)
         self._lcd.backlight = False
+
+    def show_cup_removed(self):
+        """Show brief 'cup removed' confirmation message."""
+        with self._lock:
+            self._mode = 'cup_removed'
+            self._cup_removed_time = time.time()
+            self._dirty = True
+        self._lcd.backlight = True
+
+    def show_add_cup(self):
+        """Show 'place new cup' prompt."""
+        with self._lock:
+            self._mode = 'add_cup'
+            self._dirty = True
+        self._lcd.backlight = True
+
+    def show_error(self, error_name: str, severity: int):
+        """Show error message from ESP32 on LCD.
+
+        Args:
+            error_name: Human-readable error name (e.g., 'Pump Failure')
+            severity: Error severity level (0=info, 1=warning, 2=error, 3=critical)
+        """
+        with self._lock:
+            self._mode = 'error'
+            self._error_name = error_name[:20]
+            self._error_severity = severity
+            self._error_time = time.time()
+            # Errors severe enough to stop dispensing need user acknowledgement
+            if severity >= 2:
+                self._polling_paused = True
+                self._error_acked = False
+            self._dirty = True
+        self._lcd.backlight = True
+
+    def pause_polling(self, error_name: str = None):
+        """Pause polling when an error occurs and wait for user intervention.
+        
+        Args:
+            error_name: Optional error name to display (uses last error if not provided)
+        """
+        with self._lock:
+            self._polling_paused = True
+            self._error_acked = False
+            if error_name:
+                self._error_name = error_name[:20]
+                self._error_severity = 2  # Error severity
+                self._error_time = time.time()
+            self._mode = 'error'
+            self._dirty = True
+        self._lcd.backlight = True
+        log_info("LCDUI", "Polling paused - waiting for user intervention")
+
+    def resume_polling(self):
+        """Resume polling after user acknowledges error."""
+        with self._lock:
+            self._polling_paused = False
+            self._error_acked = True
+            self._mode = 'run'
+            self._dirty = True
+        log_info("LCDUI", "Polling resumed by user")
 
     # ══════════════════════════════════════════════════════════
     # Startup tasks
@@ -751,6 +1076,13 @@ class LCDMenu:
         self._fetch_attributes()
         self.store.fetch(self.woo, self.attributes.term_slugs)
         return 'Store loaded!'
+
+    def _bg_fetch(self):
+        """Silent background fetch at startup — swallows all errors."""
+        try:
+            self._do_fetch()
+        except Exception as e:
+            print(f"[UI] Background fetch failed: {e}")
 
     def _normalize_slots(self):
         """Convert display names in slot_mapping to attribute slugs."""
@@ -989,6 +1321,7 @@ class LCDMenu:
             {'label': 'E-Stop',      'hint': '  ',        'action': lambda: self._show_confirm('E-Stop', 'Stop all motors?', lambda: self._begin_work('Stopping...', self._do_emergency_stop))},
             {'label': 'Resume',      'hint': '  ',        'action': lambda: self._begin_work('Resuming...', self._do_resume)},
             {'label': 'Clean',       'hint': f'{ARROW} ', 'action': self._enter_clean},
+            {'label': 'Hardware',    'hint': f'{ARROW} ', 'action': self._enter_hardware},
             {'label': 'Back',        'hint': '  ',        'action': self._pop},
         ]
 
@@ -1044,15 +1377,108 @@ class LCDMenu:
             return lst
         self._push(lambda: 'Spirit', items_fn)
 
+    # ── Hardware config ───────────────────────────────────────────
+
+    def _hw_save_field(self, attr: str, value: int):
+        """Update a HardwareConfig field and persist to disk."""
+        hw = self.hw.hw
+        if attr == 'pump_tubing_compensation_g':
+            setattr(hw, attr, float(value))
+        else:
+            setattr(hw, attr, value)
+        hw.save()
+        print(f"[UI] hw.{attr} = {value}")
+
+    def _hw_num(self, title: str, field_label: str, attr: str,
+                min_v: int, max_v: int, step: int, fast_step: int):
+        """Open num_entry for a HardwareConfig integer field."""
+        current = getattr(self.hw.hw, attr, None)
+        init = int(current) if current is not None else min_v
+        self._enter_num(
+            title, '', field_label,
+            min_v, max_v, step, fast_step,
+            lambda v: self._hw_save_field(attr, v),
+            initial_v=init,
+        )
+
+    def _enter_hardware(self):
+        self._push(lambda: 'Hardware', self._items_hardware)
+
+    def _items_hardware(self) -> list:
+        return [
+            {'label': 'Optic',   'hint': f'{ARROW} ', 'action': self._enter_hw_optic},
+            {'label': 'Motion',  'hint': f'{ARROW} ', 'action': self._enter_hw_motion},
+            {'label': 'Scale',   'hint': f'{ARROW} ', 'action': self._enter_hw_scale},
+            {'label': 'Back',    'hint': '  ',        'action': self._pop},
+        ]
+
+    def _enter_hw_optic(self):
+        self._push(lambda: 'Optic', self._items_hw_optic)
+
+    def _items_hw_optic(self) -> list:
+        hw = self.hw.hw
+        return [
+            {'label': f'Pour angle  {hw.servo_pour_angle:>4}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Optic', 'Pour angle:', 'servo_pour_angle', 0, 180, 1, 5)},
+            {'label': f'Close angle {hw.servo_close_angle:>4}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Optic', 'Close angle:', 'servo_close_angle', 0, 180, 1, 5)},
+            {'label': f'Pour ms  {hw.pour_duration_ms:>6}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Optic', 'Pour ms:', 'pour_duration_ms', 100, 9000, 50, 200)},
+            {'label': f'Settle ms{hw.settle_duration_ms:>6}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Optic', 'Settle ms:', 'settle_duration_ms', 100, 5000, 50, 200)},
+            {'label': 'Back', 'hint': '  ', 'action': self._pop},
+        ]
+
+    def _enter_hw_motion(self):
+        self._push(lambda: 'Motion', self._items_hw_motion)
+
+    def _items_hw_motion(self) -> list:
+        hw = self.hw.hw
+        accel     = hw.x_accel     if hw.x_accel     is not None else 0
+        max_speed = hw.x_max_speed if hw.x_max_speed is not None else 0
+        return [
+            {'label': f'Idle pos {hw.x_idle:>6}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Motion', 'Idle pos:', 'x_idle', 0, hw.x_max, 10, 100)},
+            {'label': f'Accel   {accel:>7}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Motion', 'Accel:', 'x_accel', 0, 50000, 500, 2000)},
+            {'label': f'MaxSpd  {max_speed:>7}',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Motion', 'Max speed:', 'x_max_speed', 0, 20000, 100, 500)},
+            {'label': 'Back', 'hint': '  ', 'action': self._pop},
+        ]
+
+    def _enter_hw_scale(self):
+        self._push(lambda: 'Scale', self._items_hw_scale)
+
+    def _items_hw_scale(self) -> list:
+        hw  = self.hw.hw
+        comp = int(round(hw.pump_tubing_compensation_g))
+        return [
+            {'label': f'Tubing comp {comp:>4}g',
+             'hint': '  ',
+             'action': lambda: self._hw_num('Scale', 'Tubing comp (g):', 'pump_tubing_compensation_g', 0, 50, 1, 5)},
+            {'label': 'Back', 'hint': '  ', 'action': self._pop},
+        ]
+
     def _enter_num(self, title: str, subtitle: str, field: str,
                    min_v: int, max_v: int, step: int, fast_step,
-                   cb):
-        """Enter the generic integer-entry mode."""
+                   cb, *, initial_v: int | None = None):
+        """Enter the generic integer-entry mode.
+
+        initial_v overrides the starting value (defaults to min_v).
+        """
+        start = max(min_v, min(max_v, initial_v)) if initial_v is not None else min_v
         with self._lock:
             self._nentry_title    = title
             self._nentry_subtitle = subtitle
             self._nentry_field    = field
-            self._nentry_val      = min_v
+            self._nentry_val      = start
             self._nentry_min      = min_v
             self._nentry_max      = max_v
             self._nentry_step     = step
@@ -1293,15 +1719,51 @@ class LCDMenu:
                     self.woo.send_heartbeat()
                 except Exception:
                     pass
+                
+                # Check if polling is paused and what action user selected
+                with self._lock:
+                    paused = self._polling_paused
+                    retry = self._retry_drink
+
+                if paused:
+                    # Wait while paused, but keep checking for stop signal
+                    stop.wait(1.0)
+                    continue
+
+                if retry:
+                    # User selected RETRY — retry only the mixer part (spirits already done)
+                    log_info("POLL", "Retrying mixer dispensing per user selection...")
+                    with self._lock:
+                        self._retry_drink = False
+                    # Fetch the last order and retry just the mixers
+                    pending = self.woo.fetch_all('orders', {'status': 'processing'})
+                    for order in sorted(pending, key=lambda o: o['id']):
+                        if order['id'] == self._run_last_id:
+                            try:
+                                self.orders.process_order(order, retry_mixers_only=True)
+                                with self._lock:
+                                    self._run_count += 1
+                                log_info("POLL", f"Mixer retry succeeded for order {order['id']}")
+                            except Exception as e:
+                                log_error("POLL", f"Mixer retry failed: {e}")
+                                self.pause_polling(str(e)[:20] or "Retry failed")
+                            break
+                    continue
+                
                 try:
                     pending = self.woo.fetch_all('orders', {'status': 'processing'})
                     for order in sorted(pending, key=lambda o: o['id']):
                         if stop.is_set():
                             break
-                        self.orders.process_order(order)
-                        with self._lock:
-                            self._run_count  += 1
-                            self._run_last_id = order.get('id')
+                        try:
+                            self.orders.process_order(order)
+                            with self._lock:
+                                self._run_count  += 1
+                                self._run_last_id = order.get('id')
+                        except Exception as e:
+                            log_error("POLL", f"Error processing order {order.get('id')}: {e}")
+                            self.pause_polling(str(e)[:20] or f"Order {order.get('id')} Failed")
+                            break
                 except Exception:
                     pass
                 stop.wait(self.config.poll_interval)
@@ -1313,8 +1775,9 @@ class LCDMenu:
         with self._lock:
             if self._run_stop:
                 self._run_stop.set()
-            self._mode  = 'menu'
-            self._dirty = True
+            # Re-engage PIN lock only if enabled
+            if ENABLE_PIN_LOCK:
+                self._engage_pin_lock_locked(reset_to_root=True)
         self._lcd.backlight = True
 
     # ── Quit ───────────────────────────────────────────────────

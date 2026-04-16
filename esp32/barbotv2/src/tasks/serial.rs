@@ -216,6 +216,20 @@ async fn handle_cmd(
                     }))
                     .await;
             }
+            // `G3.3 F{factor}` — restore calibration factor sent by the Pi at boot.
+            3 if gcmd.minor_number() == 3 => {
+                let Some(factor) = gcmd.value_for('F') else {
+                    invalid_cmd_msg("missing F<counts_per_gram> parameter");
+                    return;
+                };
+                if factor <= 0.0 {
+                    invalid_cmd_msg("F parameter must be positive");
+                    return;
+                }
+                cmd_chan
+                    .send(Cmd::Scale(crate::cmd::ScaleCmd::SetFactor { factor }))
+                    .await;
+            }
             3 if gcmd.minor_number() == 9 => {
                 let samples = gcmd.value_for('N').unwrap_or(10.0) as u8;
                 cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Debug { samples })).await;
@@ -243,6 +257,24 @@ async fn handle_cmd(
                         target_grams,
                     }))
                     .await;
+            }
+            // `G5 P{slot4_pos} Q{slot5_pos}` — set forbidden zone slot positions.
+            // The Pi sends this at boot so the ESP32 can compute the danger zone.
+            5 => {
+                let Some(p4) = gcmd.value_for('P') else {
+                    invalid_cmd_msg("missing P<slot4_pos> parameter");
+                    return;
+                };
+                let Some(p5) = gcmd.value_for('Q') else {
+                    invalid_cmd_msg("missing Q<slot5_pos> parameter");
+                    return;
+                };
+                let p4 = (p4 * crate::MICROSTEPS as f32).round() as i32;
+                let p5 = (p5 * crate::MICROSTEPS as f32).round() as i32;
+                crate::SLOT4_POS.store(p4, portable_atomic::Ordering::Relaxed);
+                crate::SLOT5_POS.store(p5, portable_atomic::Ordering::Relaxed);
+                log::info!("Forbidden zone set: slot4={} slot5={} (buffer={})\r",
+                    p4, p5, crate::SERVO_ZONE_BUFFER);
             }
             // `G28` start homing.
             28 => {

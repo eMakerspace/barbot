@@ -1,8 +1,10 @@
 {
     "x_axis": {
-        "max_steps": 5958,
+        "max_steps": 5928,
         "idle_position": 3000,
-        "steps_per_mm": 10
+        "steps_per_mm": 10,
+        "accel": 12500,
+        "max_speed": 3500
     },
     "slot_positions": {
         "Slot_1": 505,
@@ -18,13 +20,21 @@
         "Slot_C": 3515,
         "Slot_D": 4052
     },
+    "pump_tubing_compensation_g": 9.4,
     "spirit_optic": {
-        "pour_duration_ms": 1500,
-        "settle_duration_ms": 500,
-        "pour_angle": 90
+        "pour_duration_ms": 2300,
+        "settle_duration_ms": 1800,
+        "pour_angle": 85,
+        "close_angle": 180,
+        "servo_settle_ms": 100
     },
+    "forbidden_servo_zones": [],
     "serial": {
         "port": "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:C2:33:E4-if00",
+        "baud": 115200
+    },
+    "neopixel_serial": {
+        "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
         "baud": 115200
     }
 }
