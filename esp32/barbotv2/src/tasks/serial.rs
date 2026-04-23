@@ -4,7 +4,7 @@ use esp_println::print;
 use num_traits::ToPrimitive;
 use num_traits::float::FloatCore;
 
-use crate::cmd::{Cmd, CmdChannel, PumpCmd, StepperCmd, StopCmd, StopCmdPub};
+use crate::cmd::{Cmd, CmdChannel, StepperCmd, StopCmd, StopCmdPub};
 use crate::stepper::AccelSpeedConfig;
 
 /// Read from the USB serial and execute the commands
@@ -168,94 +168,6 @@ async fn handle_cmd(
                 }
                 cmd_chan
                     .send(Cmd::Servo(crate::cmd::ServoCmd { angle: angle as u8 }))
-                    .await;
-            }
-            // `G2 N{pump_index} T{time_ms}` Activate pump number {pump_index} for {time_ms} milliseconds.
-            // `G2.1 N{pump_index} T{time_ms}` Same as G2, but blocks until the command is complete.
-            2 => {
-                let Some(pump_index) = gcmd.value_for('I') else {
-                    invalid_cmd_msg("missing I<pump_index> parameter");
-                    return;
-                };
-                let Some(time_ms) = gcmd.value_for('D') else {
-                    invalid_cmd_msg("missing D<time_ms> parameter");
-                    return;
-                };
-
-                let Some(pump_index) = pump_index.round().to_u8() else {
-                    invalid_cmd_msg("I parameter out of range");
-                    return;
-                };
-                let Some(time_ms) = time_ms.round().to_u32() else {
-                    invalid_cmd_msg("D parameter out of range");
-                    return;
-                };
-
-                cmd_chan
-                    .send(Cmd::Pump(PumpCmd {
-                        index: pump_index,
-                        duration_ms: time_ms,
-                        wait: gcmd.minor_number() == 1,
-                    }))
-                    .await;
-            }
-            // `G3`     — read weight
-            // `G3.1`   — tare the scale
-            // `G3.2 W{grams}` — calibrate with known weight (after tare)
-            3 if gcmd.minor_number() == 1 => {
-                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Tare)).await;
-            }
-            3 if gcmd.minor_number() == 2 => {
-                let Some(grams) = gcmd.value_for('W') else {
-                    invalid_cmd_msg("missing W<grams> parameter");
-                    return;
-                };
-                cmd_chan
-                    .send(Cmd::Scale(crate::cmd::ScaleCmd::Calibrate {
-                        known_grams: grams,
-                    }))
-                    .await;
-            }
-            // `G3.3 F{factor}` — restore calibration factor sent by the Pi at boot.
-            3 if gcmd.minor_number() == 3 => {
-                let Some(factor) = gcmd.value_for('F') else {
-                    invalid_cmd_msg("missing F<counts_per_gram> parameter");
-                    return;
-                };
-                if factor <= 0.0 {
-                    invalid_cmd_msg("F parameter must be positive");
-                    return;
-                }
-                cmd_chan
-                    .send(Cmd::Scale(crate::cmd::ScaleCmd::SetFactor { factor }))
-                    .await;
-            }
-            3 if gcmd.minor_number() == 9 => {
-                let samples = gcmd.value_for('N').unwrap_or(10.0) as u8;
-                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Debug { samples })).await;
-            }
-            3 => {
-                cmd_chan.send(Cmd::Scale(crate::cmd::ScaleCmd::Read)).await;
-            }
-            // `G4 I{pump} W{grams}` — fill using pump I until weight drops by W grams
-            4 => {
-                let Some(pump_index) = gcmd.value_for('I') else {
-                    invalid_cmd_msg("missing I<pump_index> parameter");
-                    return;
-                };
-                let Some(target_grams) = gcmd.value_for('W') else {
-                    invalid_cmd_msg("missing W<grams> parameter");
-                    return;
-                };
-                let Some(pump_index) = pump_index.round().to_u8() else {
-                    invalid_cmd_msg("I parameter out of range");
-                    return;
-                };
-                cmd_chan
-                    .send(Cmd::Scale(crate::cmd::ScaleCmd::Fill {
-                        pump_index,
-                        target_grams,
-                    }))
                     .await;
             }
             // `G5 P{slot4_pos} Q{slot5_pos}` — set forbidden zone slot positions.

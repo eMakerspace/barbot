@@ -1,10 +1,10 @@
 {
     "x_axis": {
-        "max_steps": 5928,
+        "max_steps": 5964,
         "idle_position": 3000,
         "steps_per_mm": 10,
-        "accel": 12500,
-        "max_speed": 3500
+        "accel": 10000,
+        "max_speed": 3200
     },
     "slot_positions": {
         "Slot_1": 505,
@@ -29,8 +29,12 @@
         "servo_settle_ms": 100
     },
     "forbidden_servo_zones": [],
-    "serial": {
+    "hat_serial": {
         "port": "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:C2:33:E4-if00",
+        "baud": 115200
+    },
+    "pump_serial": {
+        "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
         "baud": 115200
     },
     "neopixel_serial": {

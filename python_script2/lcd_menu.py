@@ -1473,22 +1473,36 @@ class LCDMenu:
         ]
 
     def _enter_calibrate_scale(self):
-        """Enter known-weight number entry, then tare + calibrate."""
+        """Guided calibration: enter weight → remove → tare → place → confirm → calibrate."""
         self._enter_num(
             'Calibrate Scale',
             'Known weight (g):',
-            '_calib_grams',
-            1, 2000, 1, 10,
-            self._confirm_calibrate_scale,
+            'Weight:',
+            100, 5100, 100, 500,
+            self._calib_step_remove,
             initial_v=100,
         )
 
-    def _confirm_calibrate_scale(self, grams: int):
+    def _calib_step_remove(self, grams: int):
+        """Step 1: ask user to remove everything from the scale."""
         self._show_confirm(
             'Calibrate Scale',
-            f'Use {grams}g weight?',
-            lambda g=grams: self._begin_work('Calibrating...', lambda: self._do_calibrate_scale(g)),
+            'Remove all from scale',
+            lambda g=grams: self._begin_work('Taring...', lambda: self._calib_do_tare(g)),
         )
+
+    def _calib_do_tare(self, grams: int) -> str:
+        """Tare the scale, then prompt user to place the known weight."""
+        self.hw.tare_scale()
+        # After tare completes, show the 'place weight' prompt from the main thread
+        def _next():
+            self._show_confirm(
+                'Calibrate Scale',
+                f'Place {grams}g on scale',
+                lambda g=grams: self._begin_work('Calibrating...', lambda: self._do_calibrate_scale(g)),
+            )
+        threading.Thread(target=_next, daemon=True).start()
+        return 'Scale tared'
 
     def _enter_num(self, title: str, subtitle: str, field: str,
                    min_v: int, max_v: int, step: int, fast_step,

@@ -4,13 +4,13 @@
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{self, Input, InputConfig, Output};
+use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::time::Rate;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use stepper::Stepper;
 
-use crate::cmd::{CmdChannel, ScaleCmdSignal, ServoCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
+use crate::cmd::{CmdChannel, ServoCmdSignal, StepperCmdSignal, StopChannel};
 use portable_atomic::AtomicI32;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -43,9 +43,7 @@ const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpee
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
 static CMD_CHANNEL: CmdChannel = CmdChannel::new();
-static PUMP_CMD_SIG: PumpCmdSignal = PumpCmdSignal::new();
 static SERVO_CMD_SIG: ServoCmdSignal = ServoCmdSignal::new();
-static SCALE_CMD_SIG: ScaleCmdSignal = ScaleCmdSignal::new();
 // Track current stepper X position for servo forbidden zone checking
 static STEPPER_X_POS: AtomicI32 = AtomicI32::new(0);
 // Slot 4 and 5 positions sent by the Pi at boot for forbidden zone calculation.
@@ -70,15 +68,6 @@ async fn main(spawner: Spawner) {
 
     info!("Startup...\r");
 
-    // let timer1 = TimerGroup::new(peripherals.TIMG0);
-    // let _init = esp_wifi::init(
-    //     timer1.timer0,
-    //     esp_hal::rng::Rng::new(peripherals.RNG),
-    //     peripherals.RADIO_CLK,
-    // )
-    // .unwrap();
-    //
-
     let (usb_rx, _) = UsbSerialJtag::new(peripherals.USB_DEVICE)
         .into_async()
         .split();
@@ -93,7 +82,7 @@ async fn main(spawner: Spawner) {
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
     spawner.must_spawn(tasks::cup_presence_monitor(cup_sensor));
-    
+
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
         idle_output_level: esp_hal::gpio::Level::Low,
@@ -130,47 +119,15 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(tasks::route_cmd::route_cmd(tasks::route_cmd::HandleCmd {
         cmd_chan: &CMD_CHANNEL,
         stepper_sig: &STEPPER_CMD_SIG,
-        pump_sig: &PUMP_CMD_SIG,
         stop_sub: STOP_CHANNEL.subscriber().unwrap(),
         servo_sig: &SERVO_CMD_SIG,
-        scale_sig: &SCALE_CMD_SIG,
     }));
 
-    let pump_pin_cfg = gpio::OutputConfig::default().with_drive_mode(gpio::DriveMode::PushPull);
-    spawner.must_spawn(tasks::pump::pump_task(
-        &PUMP_CMD_SIG,
-        STOP_CHANNEL.subscriber().unwrap(),
-        [
-            Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-        ],
-    ));
-    
     spawner.must_spawn(tasks::servo::servo_task(
         &SERVO_CMD_SIG,
         STOP_CHANNEL.subscriber().unwrap(),
         peripherals.LEDC,
         peripherals.GPIO9,
-    ));
-
-    // HX711 scale: DATA on GPIO8, CLK on GPIO10
-    let scale_data = Input::new(
-        peripherals.GPIO8,
-        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
-    );
-    let scale_clk = Output::new(
-        peripherals.GPIO10,
-        esp_hal::gpio::Level::Low,
-        pump_pin_cfg,
-    );
-    spawner.must_spawn(tasks::scale::scale_task(
-        &SCALE_CMD_SIG,
-        &PUMP_CMD_SIG,
-        STOP_CHANNEL.subscriber().unwrap(),
-        scale_clk,
-        scale_data,
     ));
 
     info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));

@@ -4,9 +4,7 @@ use futures::{FutureExt, select_biased};
 
 
 pub mod servo;
-pub mod pump;
 pub mod route_cmd;
-pub mod scale;
 pub mod serial;
 pub mod stepper;
 

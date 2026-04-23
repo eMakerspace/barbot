@@ -1,33 +1,32 @@
-"""Hardware interface – real GPIO + ESP32 G-code serial implementation.
+"""Hardware interface – real GPIO + two ESP32 G-code serial connections.
 
-ESP32 G-code command reference (firmware: barbotv2):
-  G28              – Home stepper (required before any movement). Responds with
-                     "Homing successful, end pos = N" or "Homing failed: ..."
-  G0 X{pos}        – Move stepper to absolute step position (0…end_pos).
-                     No explicit done response; use G3 as a sync barrier.
+HAT ESP32 (barbotv2) — stepper, servo, cup sensor:
+  G28              – Home stepper. Responds "Homing successful, end pos = N".
+  G0 X{pos}        – Move stepper to absolute step position. Responds "Move done".
   G0.1 X{fact}     – Move to fractional position (0.0…1.0 of full range).
-  G1 Z{angle}      – Move servo to angle 0–180°. Fast (within one 20 ms PWM cycle).
+  G1 Z{angle}      – Move servo to angle 0–180°.
+  G5 P{p4} Q{p5}   – Set forbidden servo zone (slot 4 / slot 5 positions).
+  T0 D{ms}         – Wait ms milliseconds (blocks HAT command queue).
+  M0               – Graceful stop (stepper decelerates).
+  M0.1             – Immediate emergency stop (stepper/servo off).
+  M1               – Resume after stop.
+
+Pump ESP32 (esp32_pump) — pumps, scale, fill:
   G2 I{n} D{ms}    – Run pump n (0–3) for ms milliseconds, non-blocking.
   G2.1 I{n} D{ms}  – Run pump n (0–3) for ms milliseconds, blocking.
   G3               – Read scale weight. Responds "Weight: X.XXg (raw: …)".
   G3.1             – Tare scale. Responds "Scale tared (offset: …)".
   G3.2 W{g}        – Calibrate scale with known weight. Responds "Calibrated: …".
+  G3.3 F{cpg}      – Restore calibration factor (sent at boot).
   G4 I{n} W{g}     – Autonomous fill: run pump n until weight drops by g grams.
                      Responds "[FILL_END] reason=… dispensed=…g duration=…ms".
-  T0 D{ms}         – Wait on ESP32 side for ms milliseconds (blocks command queue).
-  M0               – Graceful stop (stepper decelerates).
-  M0.1             – Immediate emergency stop (all motors/pumps off).
-  M1               – Resume after stop.
+  M0 / M0.1 / M1  – Stop / resume pumps.
 
 Synchronisation strategy:
-  route_cmd on the ESP32 serialises all commands through BiSignal, which
-  blocks until the receiving task fully completes the operation.  This means
-  the 128-deep CMD_CHANNEL acts as an ordered pipeline: commands execute
-  strictly in the order they are sent.
-
-  For commands with known responses (G28, G3, G3.1, G4) we wait for the
-  expected string.  For pure motion (G0) there is no response, so we append a
-  G3 scale-read to the queue and treat its response as a completion barrier.
+  HAT route_cmd serialises all commands through BiSignal, so commands execute
+  strictly in order.  "Move done" is the completion signal for G0 moves.
+  For mixer dispense, _sync() waits for "Move done" before sending tare/fill
+  to the pump ESP, ensuring the carriage is at the slot before dispensing.
 """
 
 import json
@@ -363,7 +362,8 @@ class HardwareInterface:
         self.hw = hw_config
         self.x_position: int = 0
         self._gpio_ready = False
-        self._esp: EspSerial | None = None
+        self._esp: EspSerial | None = None        # barbotv2: stepper / servo / cup
+        self._pump_esp: EspSerial | None = None   # esp32_pump: pumps / scale / fill
         self._neo: NeopixelSerial | None = None
         self.serial_error: str | None = None   # set if serial init failed
         self.ui = None  # injected reference to LCDMenu
@@ -386,26 +386,37 @@ class HardwareInterface:
 
         if _SERIAL_AVAILABLE and hw_config.serial_port:
             try:
-                log_info("HWINT", f"Initializing serial connection to {hw_config.serial_port}")
+                log_info("HWINT", f"Initializing HAT serial (barbotv2) on {hw_config.serial_port}")
                 self._esp = EspSerial(hw_config.serial_port, hw_config.serial_baud)
-                self._esp._on_calibrated = self._save_calibration_factor
                 self._esp._on_error_state = self._on_error_state
                 self._esp._on_cup_state = self._on_cup_state_changed
-                self._restore_calibration()
                 self._restore_servo_zones()
                 self._esp.start_ipc_server()
                 # Park servo at safe closed position on startup
                 self._esp.send(f"G1 Z{hw_config.servo_close_angle}")
-                log_info("HWINT", "Serial connection and IPC server ready")
+                log_info("HWINT", "HAT serial and IPC server ready")
             except Exception as e:
                 self.serial_error = str(e)
-                log_error("HWINT", f"Serial initialization failed: {e} – running in simulation mode")
+                log_error("HWINT", f"HAT serial initialization failed: {e} – running in simulation mode")
         else:
             if not hw_config.serial_port:
-                self.serial_error = "No serial port configured"
-                log_warn("HWINT", "No serial port configured – running in simulation mode")
+                self.serial_error = "No HAT serial port configured"
+                log_warn("HWINT", "No HAT serial port configured – running in simulation mode")
             else:
                 log_warn("HWINT", "pyserial not available")
+
+        if _SERIAL_AVAILABLE and hw_config.pump_port:
+            try:
+                log_info("HWINT", f"Initializing pump serial (esp32_pump) on {hw_config.pump_port}")
+                self._pump_esp = EspSerial(hw_config.pump_port, hw_config.pump_baud)
+                self._pump_esp._on_calibrated = self._save_calibration_factor
+                self._restore_calibration()
+                log_info("HWINT", "Pump serial ready")
+            except Exception as e:
+                log_error("HWINT", f"Pump serial initialization failed: {e} – scale/pump in simulation mode")
+        else:
+            if not hw_config.pump_port:
+                log_warn("HWINT", "No pump serial port configured – scale/pump in simulation mode")
 
         # Initialize neopixel/7-segment ESP32 if configured
         if _SERIAL_AVAILABLE and hw_config.neo_port:
@@ -429,15 +440,15 @@ class HardwareInterface:
             print(f"[HW] Failed to save calibration: {e}")
 
     def _restore_calibration(self):
-        """Send G3.3 to the ESP32 to restore the previously saved calibration."""
+        """Send G3.3 to the pump ESP32 to restore the previously saved calibration."""
         try:
             cfg = json.loads(_HW_CONFIG_PATH.read_text())
             factor = cfg.get("scale_calibration_factor")
             if factor and isinstance(factor, (int, float)) and factor > 0:
-                self._esp.send(f"G3.3 F{factor:.6f}")
+                self._pump_esp.send(f"G3.3 F{factor:.6f}")
                 print(f"[HW] Calibration restored: {factor:.4f} counts/gram")
             else:
-                print("[HW] No saved calibration — ESP32 will use firmware default")
+                print("[HW] No saved calibration — pump ESP32 will use firmware default")
         except Exception as e:
             print(f"[HW] Could not restore calibration: {e}")
 
@@ -492,9 +503,15 @@ class HardwareInterface:
         if self._esp:
             try:
                 self._esp.close()
-                log_info("HWINT", "Serial connection closed")
+                log_info("HWINT", "HAT serial closed")
             except Exception as e:
-                log_warn("HWINT", f"Serial close error: {e}")
+                log_warn("HWINT", f"HAT serial close error: {e}")
+        if self._pump_esp:
+            try:
+                self._pump_esp.close()
+                log_info("HWINT", "Pump serial closed")
+            except Exception as e:
+                log_warn("HWINT", f"Pump serial close error: {e}")
         if self._neo:
             try:
                 self._neo.close()
@@ -504,9 +521,6 @@ class HardwareInterface:
         log_info("HWINT", "Hardware cleanup finished")
 
     # ── Cup sensor ───────────────────────────────────────────────
-
-    # Countdown seconds before dispensing starts after a cup is placed.
-    CUP_CONFIRM_SECS = 6
 
     def wait_for_cup(self, timeout_sec: float = 30.0):
         """Block until a cup is detected and confirmed via ESP32 light curtain sensor.
@@ -553,70 +567,33 @@ class HardwareInterface:
                     self.ui.show_error("Cup Missing", 3)
                 raise HardwareError(f"Cup not detected after {timeout_sec}s")
 
-        self._cup_confirm_countdown(timeout_sec)
+        self._cup_confirm_countdown()
 
-    def _cup_confirm_countdown(self, timeout_sec: float):
+    # Countdown seconds before dispensing starts after a cup is placed.
+    CUP_CONFIRM_SECS = 6
+
+    def _cup_confirm_countdown(self):
         """6-second countdown with slow→fast green flash and 7-seg digit countdown.
 
-        Restarts from the beginning if the cup is removed and replaced.
-        Raises HardwareError if the cup is not replaced within timeout_sec.
+        Once started, runs to completion regardless of sensor state.
         """
         total = self.CUP_CONFIRM_SECS
-        while True:
-            log_info("HWINT", f"Cup confirmed — starting {total}s countdown...")
-            count_start = time.monotonic()
-            for step, remaining in enumerate(range(total, 0, -1)):
-                # Switch LED speed at halfway point: slow first half, fast second half
-                if remaining > total // 2:
-                    if self._neo:
-                        self._neo.send("-e GREEN_FLASH_SLOW")
-                else:
-                    if self._neo:
-                        self._neo.send("-e GREEN_FLASH_FAST")
-                # Show countdown digit on 7-seg
+        log_info("HWINT", f"Cup confirmed — starting {total}s countdown...")
+        count_start = time.monotonic()
+        for step, remaining in enumerate(range(total, 0, -1)):
+            if remaining > total // 2:
                 if self._neo:
-                    self._neo.send(str(remaining))
-
-                # Wait until this tick's 1-second deadline, polling for cup removal
-                tick_end = count_start + step + 1
-                cup_removed = False
-                while time.monotonic() < tick_end:
-                    wait = min(tick_end - time.monotonic(), 0.05)
-                    if wait > 0:
-                        self._cup_state_changed.wait(timeout=wait)
-                    self._cup_state_changed.clear()
-                    if not self._cup_present:
-                        cup_removed = True
-                        break
-
-                if cup_removed:
-                    log_info("HWINT", "Cup removed during countdown, restarting wait...")
-                    if self.ui:
-                        self.ui.show_add_cup()
-                    if self._neo:
-                        self._neo.send("-cupwait")
-                    # Wait for cup to come back
-                    inner_deadline = time.monotonic() + timeout_sec
-                    replaced = False
-                    while time.monotonic() < inner_deadline:
-                        self._cup_state_changed.wait(timeout=min(inner_deadline - time.monotonic(), 0.5))
-                        self._cup_state_changed.clear()
-                        if self._cup_present:
-                            replaced = True
-                            break
-                    if not replaced:
-                        log_error("HWINT", f"Cup not replaced within {timeout_sec}s!")
-                        if self._neo:
-                            self._neo.send("-e RED_FLASH_FAST")
-                        if self.ui:
-                            self.ui.show_error("Cup Missing", 3)
-                        raise HardwareError(f"Cup not detected after {timeout_sec}s")
-                    # Cup back — restart countdown from the top
-                    break
+                    self._neo.send("-e GREEN_FLASH_SLOW")
             else:
-                # Countdown completed without removal
-                log_info("HWINT", "Cup countdown done, starting dispense.")
-                return
+                if self._neo:
+                    self._neo.send("-e GREEN_FLASH_FAST")
+            if self._neo:
+                self._neo.send(str(remaining))
+            tick_end = count_start + step + 1
+            wait = tick_end - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        log_info("HWINT", "Cup countdown done, starting dispense.")
 
     # Seconds before escalating to overdue strobe
     CUP_REMOVAL_OVERDUE_SEC = 60.0
@@ -751,20 +728,17 @@ class HardwareInterface:
         self.x_position = position
 
     def _sync(self, timeout: float = 30.0):
-        """Send G3 (scale read) as a synchronisation barrier.
+        """Wait for the HAT command queue to drain using 'Move done' as a barrier.
 
-        Because route_cmd serialises all commands through BiSignal, this G3
-        will only execute after all previously queued commands have completed.
-        The "Weight:" (or scale-error) response confirms they are done.
+        Sends a no-op G0 to the current position so route_cmd serialises it
+        through BiSignal; the 'Move done' response confirms all prior commands
+        have completed.  Falls back silently if HAT serial is unavailable.
         """
         if not self._esp:
             return
-        self._esp.send("G3")
+        self._esp.send(f"G0 X{self.x_position}")
         try:
-            self._esp.wait_for(
-                ["Weight:", "raw:", "HX711 not", "cannot read", "not calibrated"],
-                timeout=timeout,
-            )
+            self._esp.wait_for(["Move done"], timeout=timeout)
         except TimeoutError:
             print("[HW] WARNING: sync barrier timed out – assuming move complete")
 
@@ -874,11 +848,12 @@ class HardwareInterface:
         **SAFETY:** Servo is parked at close_angle BEFORE moving carriage.
         """
         pos = self.hw.position_for_slot(slot)
-        if pos is not None:
-            zone = self.hw.in_forbidden_servo_zone(pos)
-            if zone:
-                print(f"[HW] BLOCKED: servo open at slot {slot} (pos={pos}) forbidden — {zone}")
-                return
+        if pos is None:
+            raise HardwareError(f"No position configured for slot {slot!r}")
+        zone = self.hw.in_forbidden_servo_zone(pos)
+        if zone:
+            print(f"[HW] BLOCKED: servo open at slot {slot} (pos={pos}) forbidden — {zone}")
+            return
         # Park servo BEFORE moving carriage (critical for safety)
         if self._esp:
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
@@ -886,7 +861,7 @@ class HardwareInterface:
         # Moving animation
         if self._neo:
             self._neo.send("-mv")
-        self._move_to_slot(slot)
+        self.move_x(pos)  # blocks until sled is at slot
         pour_ms = int(self.hw.pour_duration_ms * viscosity)
         settle_ms = self.hw.settle_duration_ms
         print(
@@ -925,27 +900,22 @@ class HardwareInterface:
         # Moving animation
         if self._neo:
             self._neo.send("-mv")
-        self._move_to_slot(slot)
+        pos = self.hw.position_for_slot(slot)
+        if pos is None:
+            raise HardwareError(f"No position configured for slot {slot!r}")
+        self.move_x(pos)  # blocks until sled is at slot
 
-        if self._esp:
-            # Tare executes after the move completes (route_cmd serialises)
-            self._esp.send("G3.1")
-            self._esp.wait_for(
-                "Scale tared",
-                error_patterns=["HX711 not"],
-                timeout=60,   # covers move time + tare
-            )
+        if self._pump_esp:
             # Mixing animation (pump running)
             if self._neo:
                 self._neo.send("-mix")
             comp = self.hw.pump_tubing_compensation_g
             target_g = ml + comp
-            self._esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
-            line = self._esp.wait_for("[FILL_END]", timeout=120)
+            self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
+            line = self._pump_esp.wait_for("[FILL_END]", timeout=120)
             reason = self._parse_fill_end_reason(line)
             if reason not in {"target_reached", "zero_target"}:
                 raise HardwareError(f"Fill failed ({reason}): {line}")
-            # Log dispensed amount parsed from "[FILL_END] reason=… dispensed=Xg …"
             try:
                 for part in line.split():
                     if part.startswith("dispensed="):
@@ -959,9 +929,9 @@ class HardwareInterface:
 
     def tare_scale(self) -> str:
         """Tare (zero) the scale."""
-        if self._esp:
-            self._esp.send("G3.1")
-            self._esp.wait_for(
+        if self._pump_esp:
+            self._pump_esp.send("G3.1")
+            self._pump_esp.wait_for(
                 "Scale tared",
                 error_patterns=["HX711 not"],
                 timeout=10,
@@ -970,18 +940,15 @@ class HardwareInterface:
         return "Scale tare (simulated)."
 
     def calibrate_scale(self, known_grams: float) -> str:
-        """Tare then calibrate scale with a known weight on the platform.
+        """Calibrate scale with a known weight already on the platform (no tare).
 
-        Sends G3.1 (tare) then G3.2 W{grams}. The ESP32 responds with
-        'Calibrated: X counts/gram' which triggers _save_calibration_factor,
-        persisting the value to hardware_config.json for restore on next boot.
+        Assumes tare_scale() was already called with the scale empty.
+        Sends G3.2 W{grams} and waits for confirmation.
         """
-        if not self._esp:
+        if not self._pump_esp:
             return "Calibration (simulated)."
-        self._esp.send("G3.1")
-        self._esp.wait_for("Scale tared", error_patterns=["HX711 not"], timeout=10)
-        self._esp.send(f"G3.2 W{known_grams:.1f}")
-        line = self._esp.wait_for(
+        self._pump_esp.send(f"G3.2 W{known_grams:.1f}")
+        line = self._pump_esp.wait_for(
             ["Calibrated:", "Calibration failed"],
             error_patterns=["HX711 not"],
             timeout=10,
@@ -1014,9 +981,9 @@ class HardwareInterface:
 
     def read_weight(self) -> float:
         """Read current weight from the scale.  Returns grams as float."""
-        if self._esp:
-            self._esp.send("G3")
-            line = self._esp.wait_for(
+        if self._pump_esp:
+            self._pump_esp.send("G3")
+            line = self._pump_esp.wait_for(
                 ["Weight:", "raw:", "HX711 not", "cannot read"],
                 timeout=10,
             )
@@ -1026,10 +993,10 @@ class HardwareInterface:
 
     def read_weight_str(self) -> str:
         """Return a human-readable weight string for display on the LCD."""
-        if self._esp:
-            self._esp.send("G3")
+        if self._pump_esp:
+            self._pump_esp.send("G3")
             try:
-                line = self._esp.wait_for(
+                line = self._pump_esp.wait_for(
                     ["Weight:", "raw:", "HX711 not", "cannot read"],
                     timeout=10,
                 )
@@ -1048,12 +1015,16 @@ class HardwareInterface:
         print("[HW] EMERGENCY STOP")
         if self._esp:
             self._esp.send("M0.1")
+        if self._pump_esp:
+            self._pump_esp.send("M0.1")
 
     def resume(self):
         """Send M1 (continue): clear emergency stop state on ESP32."""
         print("[HW] Resume")
         if self._esp:
             self._esp.send("M1")
+        if self._pump_esp:
+            self._pump_esp.send("M1")
 
     # ── High-level drink sequence ────────────────────────────────
 
@@ -1064,20 +1035,28 @@ class HardwareInterface:
             spec: DrinkSpec with spirits and mixers to dispense
             retry_mixers_only: If True, skip spirits (already done) and only retry mixers
         """
+        num = self._last_order_id % 100
+
         if not retry_mixers_only:
             self.wait_for_cup()
+            if self._neo:
+                self._neo.send(f"-br {num}")
 
             for s in spec.spirits:
                 if s["slot"] is None:
                     print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
                     continue
                 self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
+                if self._neo:
+                    self._neo.send(f"-br {num}")
 
         for m in spec.mixers:
             if m["slot"] is None:
                 print(f"[HW] WARN: no slot for mixer '{m['ingredient']}' – skipping")
                 continue
             self.dispense_mixer(m["slot"], m["ml"])
+            if self._neo:
+                self._neo.send(f"-br {num}")
 
         self.move_to_idle()
         # Celebration animation when drink is done
@@ -1097,7 +1076,7 @@ class HardwareInterface:
         """Display order ID on neopixel 7-segment display."""
         self._last_order_id = short_id
         if self._neo:
-            self._neo.send(f"{short_id % 100}")   # static number on 7-seg
+            self._neo.send(f"-br {short_id % 100}")  # breathe number while preparing
 
     def signal_done(self):
         pass  # handled by LCD layer

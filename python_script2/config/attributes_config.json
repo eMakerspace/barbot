@@ -76,13 +76,13 @@
                 "id": 39,
                 "name": "Ananassaft",
                 "bottle_size": 100.0,
-                "viscosity": 0.5
+                "viscosity": 1.0
             },
             "bitter-lemon": {
                 "id": 33,
                 "name": "Bitter Lemon",
                 "bottle_size": 100.0,
-                "viscosity": 2.9
+                "viscosity": 1.0
             },
             "citro": {
                 "id": 30,
@@ -100,7 +100,7 @@
                 "id": 38,
                 "name": "Ginger Ale",
                 "bottle_size": 100.0,
-                "viscosity": 2.9
+                "viscosity": 1.0
             },
             "ice-tea": {
                 "id": 29,
@@ -118,7 +118,7 @@
                 "id": 31,
                 "name": "Tonic Water",
                 "bottle_size": 100.0,
-                "viscosity": 2.2
+                "viscosity": 1.0
             }
         },
         "pa_mixers-amount": {

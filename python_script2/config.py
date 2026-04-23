@@ -211,9 +211,13 @@ class HardwareConfig:
         self.forbidden_servo_zones: list[dict] = data.get("forbidden_servo_zones", [])
         self.pump_tubing_compensation_g: float = data.get("pump_tubing_compensation_g", 0.0)
 
-        ser = data.get("serial", {})
-        self.serial_port: str | None = ser.get("port", None)
-        self.serial_baud: int = ser.get("baud", 115200)
+        hat = data.get("hat_serial", data.get("serial", {}))  # fallback to old key
+        self.serial_port: str | None = hat.get("port", None)
+        self.serial_baud: int = hat.get("baud", 115200)
+
+        pump = data.get("pump_serial", {})
+        self.pump_port: str | None = pump.get("port", None)
+        self.pump_baud: int = pump.get("baud", 115200)
 
         neo = data.get("neopixel_serial", {})
         self.neo_port: str | None = neo.get("port", None)
@@ -259,9 +263,13 @@ class HardwareConfig:
                 "servo_settle_ms":    self.servo_settle_ms,
             },
             "forbidden_servo_zones": self.forbidden_servo_zones,
-            "serial": {
+            "hat_serial": {
                 "port": self.serial_port,
                 "baud": self.serial_baud,
+            },
+            "pump_serial": {
+                "port": self.pump_port,
+                "baud": self.pump_baud,
             },
             "neopixel_serial": {
                 "port": self.neo_port,
