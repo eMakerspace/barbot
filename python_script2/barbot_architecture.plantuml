@@ -1,0 +1,162 @@
+@startuml
+hide empty description
+title Barbot Main FSM - Extended Clean Mode & Mixer Error Handling
+
+' Set the default background color for all states to Idle
+skinparam state {
+    BackgroundColor #E8E8E8
+    BorderColor #555555
+}
+
+' Color Legend for LED Animations
+legend top right
+  **LED Animation Modes**
+  <back:#E8E8E8>   Idle (Default)   </back>
+  <back:#FFB347>   Cup Missing   </back>
+  <back:#ADD8E6>   Drink / Clean Pouring   </back>
+  <back:#98FB98>   Drink / Clean Finished   </back>
+  <back:#FFFF99>   Warning / Interrupted   </back>
+  <back:#FF6961>   Emergency   </back>
+endlegend
+
+' Global Exception Handling
+state Cleanup
+note right of Cleanup
+  Any Exception 
+  (e.g., KeyboardInterrupt)
+  from ANY state triggers
+  a transition to Cleanup.
+end note
+Cleanup --> [*] : clean exit
+
+' Page 1: Main Navigation & Setup
+[*] --> Homing : start
+Homing --> fetch_store_data : finish, coming from start
+fetch_store_data --> main_menu : finish, coming from start
+
+' Exit from Main Menu
+main_menu --> [*] : exit program
+
+main_menu --> Settings : select settings
+Settings --> main_menu : return
+Settings --> fetch_store_data : select fetch
+fetch_store_data --> Settings : finish, from settings
+
+Settings --> Set_viscosity : select
+Set_viscosity --> Settings : return
+Settings --> Set_drink_slots : select
+Set_drink_slots --> Settings : return
+
+main_menu --> maintenance : select
+maintenance --> main_menu : return
+maintenance --> Calibrate_scale : select
+Calibrate_scale --> maintenance : return
+
+' Added read_weight state
+maintenance --> read_weight : select
+read_weight --> maintenance : return
+
+' Extended Clean Sub-Menu
+maintenance --> Clean : select
+Clean --> maintenance : return (cancel)
+Clean --> clean_spirits : select clean spirits
+Clean --> clean_mixers : select clean mixers
+
+state verify_cup_mounted #FFB347
+clean_spirits --> verify_cup_mounted : set pos & count
+clean_mixers --> verify_cup_mounted : set pos & grams
+
+verify_cup_mounted --> verify_cup_mounted : cup missing
+verify_cup_mounted --> start_cup_thread_clean : cup mounted
+start_cup_thread_clean --> move_to_pos : start cleaning
+
+' New Thread mentioned on Page 1
+state "Cup Check Thread" as CupThread {
+  [*] --> cup_check : start new thread
+  cup_check --> stop_cup_thread : stop
+}
+
+' Page 2 & 3: Run Cycle FSM
+
+' Define specific state colors based on LED animation
+state wait_for_cup_addition #FFB347
+state wait_for_cup_added #FFB347
+state wait_for_cup_removal #98FB98
+state stop #FF6961
+
+main_menu --> run_idle : start run
+run_idle --> main_menu : exit run
+
+run_idle --> wait_for_cup_addition : cup removed
+wait_for_cup_addition --> run_idle : cup added
+
+run_idle --> check_order : periodically
+check_order --> run_idle : no order
+check_order --> move_to_pos : order # found AND cup added
+
+' New states for empty bottle/stuck pipe (OUTSIDE Emergency Zone)
+state mixer_error #FFFF99 : Bottle empty / pipe stuck
+state verify_cup_before_resume #FFB347 : Warning resolved,\nchecking cup
+
+' The Red Box: Emergency Stop Area (Pouring Animation - Shared by Run & Clean)
+state "Emergency Stop Active Zone" as EmergencyZone {
+    state move_to_pos #ADD8E6
+    state pour_spirit #ADD8E6
+    state pour_mixer #ADD8E6
+    state check_next_position #ADD8E6
+    state move_to_idle #ADD8E6
+    
+    move_to_pos --> pour_spirit : spirit
+    pour_spirit --> pour_spirit : n times
+    pour_spirit --> check_next_position : done
+
+    move_to_pos --> pour_mixer : mixer
+    pour_mixer --> pour_mixer : for n grams
+    pour_mixer --> check_next_position : done
+    
+    check_next_position --> move_to_pos : next position
+    check_next_position --> move_to_idle : finished
+}
+
+' Warning Flow (Exits and Re-enters the Emergency Zone)
+pour_mixer --> mixer_error : weight not changing (motion stops)
+mixer_error --> verify_cup_before_resume : user resolves issue
+verify_cup_before_resume --> verify_cup_before_resume : cup missing
+verify_cup_before_resume --> pour_mixer : cup placed (resume calc remaining)
+
+' Emergency Stop Flow (Shared by Run & Clean)
+EmergencyZone --> stop : emergency stop if cup is removed!
+stop --> wait_for_cup_added : halted
+wait_for_cup_added --> disarm_emergency_stop : cup added
+
+' DRY Routing Node: Determine emergency recovery based on mode
+state emergency_recovery_routing <<choice>>
+disarm_emergency_stop --> emergency_recovery_routing : disarmed
+
+' Run Mode Emergency Recovery
+emergency_recovery_routing --> repeat_current_drink : if in Run Mode
+repeat_current_drink --> move_to_pos : resume
+
+' Clean Mode Emergency Recovery (Abort to maintenance)
+emergency_recovery_routing --> maintenance : if in Clean Mode (abort)
+
+' Normal Completion Flow (Shared by Run & Clean)
+move_to_idle --> wait_for_cup_removal : idle reached
+
+' DRY Routing Node: Determine where to return based on the mode
+state after_cup_removal_routing <<choice>>
+wait_for_cup_removal --> after_cup_removal_routing : removed
+
+' Explicitly define wait_for_new_cup_added color here to override default
+state wait_for_new_cup_added #FFB347
+
+' Run Mode Flow
+after_cup_removal_routing --> wait_for_new_cup_added : if in Run Mode
+wait_for_new_cup_added --> check_for_other_drinks_in_same_order : added
+check_for_other_drinks_in_same_order --> move_to_pos : other drink found
+check_for_other_drinks_in_same_order --> run_idle : order finished
+
+' Clean Mode Flow
+after_cup_removal_routing --> maintenance : if in Clean Mode (no orders)
+
+@enduml

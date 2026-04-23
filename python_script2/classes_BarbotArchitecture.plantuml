@@ -1,0 +1,209 @@
+@startuml classes_BarbotArchitecture
+set namespaceSeparator none
+class "AbstractLED" as interfaces.AbstractLED {
+  {abstract}set(mode: str) -> None
+}
+class "AbstractMachine" as interfaces.AbstractMachine {
+  x_max : int
+  x_position : int
+  {abstract}cup_present() -> bool
+  {abstract}homing() -> None
+  {abstract}move_to(target_steps: int) -> None
+  {abstract}move_to_idle() -> None
+  {abstract}move_to_slot(slot: str) -> None
+  {abstract}pour_mixer(slot: str, target_g: float) -> None
+  {abstract}pour_spirit(slot: str, pours: int, viscosity: float) -> None
+  {abstract}read_weight() -> float
+  {abstract}stop_pump() -> None
+  {abstract}tare_scale() -> None
+}
+class "BarbotFSM" as barbot_fsm.BarbotFSM {
+  inventory
+  led
+  machine
+  repo
+  resolver
+  ui : NoneType
+  run()
+}
+class "BarbotRepository" as repository.BarbotRepository {
+  attribute_ids : dict[str, int]
+  attribute_slugs : dict[str, str]
+  available_mixers : list[str]
+  available_spirits : list[str]
+  bottle_properties : dict
+  config : BarbotConfig
+  empty_slots : set[str]
+  last_fetched : str | None
+  poll_interval : int
+  products : list[dict]
+  slot_mapping : dict[str, str]
+  term_slugs : dict[str, dict[str, str]]
+  attr_slug(display_name: str) -> str
+  batch_update_products(updates: list[dict]) -> bool
+  batch_update_variations(parent_id: int, updates: list[dict]) -> bool
+  clear_slot(slot: str) -> None
+  complete_order(order_id: int) -> bool
+  fetch_all(endpoint: str, params: dict | None) -> list[dict]
+  fetch_all_store_data() -> None
+  fetch_orders() -> list[dict]
+  get_diy_volumes() -> dict
+  get_preset_recipes() -> dict
+  ingredient_to_slot(ingredient: str) -> str | None
+  mixer_viscosity(slug: str) -> float
+  parse_cl_to_ml(val) -> float
+  product_by_id(product_id: int) -> dict | None
+  save_viscosity_local(attr_slug: str, term_slug: str, value: float) -> None
+  send_heartbeat() -> None
+  set_slot(slot: str, ingredient: str) -> None
+  slot_ingredient(slot: str) -> str | None
+  slug_to_name(slug: str) -> str
+  spirit_measure_cl() -> float
+  spirit_viscosity(slug: str) -> float
+  update_term_viscosity(attr_id: int, term_id: int, value: float) -> bool
+}
+class "CupCheckThread" as barbot_fsm.CupCheckThread {
+  activate()
+  deactivate()
+  start()
+  stop()
+}
+class "DispenseStep" as barbot_fsm.DispenseStep {
+  grams : float
+  ingredient : str
+  kind : str
+  pours : int
+  slot : str
+  viscosity : float
+  label() -> str
+}
+class "DrinkResolver" as mixer.DrinkResolver {
+  resolve(item: dict) -> list[DrinkSpec]
+}
+class "DrinkSpec" as mixer.DrinkSpec {
+  mixers : list[dict]
+  name : str
+  spirits : list[dict]
+  log() -> None
+}
+class "DummyLED" as hardware_dummy.DummyLED {
+  mode : str
+  set(mode: str) -> None
+}
+class "DummyMachine" as hardware_dummy.DummyMachine {
+  x_max : int
+  x_position : int
+  cup_present() -> bool
+  homing() -> None
+  move_to(target_steps: int) -> None
+  move_to_idle() -> None
+  move_to_slot(slot: str) -> None
+  pour_mixer(slot: str, target_g: float) -> None
+  pour_spirit(slot: str, pours: int, viscosity: float) -> None
+  read_weight() -> float
+  simulate_cup_placed(cup_weight_g: float) -> None
+  simulate_cup_removed() -> None
+  stop_pump() -> None
+  tare_scale() -> None
+}
+class "HeartbeatService" as orders.HeartbeatService {
+  start() -> None
+  stop() -> None
+}
+class "InventoryManager" as inventory.InventoryManager {
+  mark_empty(slot: str) -> bool
+  mark_refill(slot: str) -> bool
+  push_all() -> str
+  sync_ingredient(ingredient: str, in_stock: bool) -> None
+}
+class "LCDMenu" as lcd_menu.LCDMenu {
+  current_mode : str
+  nentry_val : int
+  visc_val : float
+  xmove_target : int
+  clear_mixing()
+  register_menu_select(cb: Callable[[int], None])
+  register_press(cb: Callable[[str], None])
+  register_rotate(cb: Callable[[int], None])
+  render_loop()
+  set_work_done(result: str)
+  show_confirm(title: str, msg: str, on_yes: Callable, back_mode: str)
+  show_info(title: str, lines: list[str])
+  show_menu(title: str, items: list[dict])
+  show_mixing(drink_num: int, total: int, name: str)
+  show_num_entry(title: str, subtitle: str, field: str, min_v: int, max_v: int, step: int, fast_step: int | None)
+  show_run(count: int, last_id: int | None)
+  show_visc_edit(bottle: str, val: float, min_v: float, max_v: float, step: float)
+  show_working(title: str)
+  show_x_move(current: int, x_max: int)
+  shutdown()
+  start()
+  stop()
+  update_run(count: int, last_id: int | None)
+}
+class "MenuSelectEvent" as barbot_fsm.MenuSelectEvent {
+  index : int
+}
+class "<color:red>MixerStall</color>" as hardware_dummy.MixerStall {
+}
+class "Mode" as barbot_fsm.Mode {
+  name
+}
+class "OrderProgress" as progress.OrderProgress {
+  clear()
+  drink_done()
+  resume_from_disk(order_id: int, total: int) -> int
+  start(order_id: int, total: int)
+}
+class "PressEvent" as barbot_fsm.PressEvent {
+  ui_mode : str
+}
+class "State" as barbot_fsm.State {
+  name
+}
+class "StoreConfig" as store.StoreConfig {
+  available_mixers : list[str]
+  available_spirits : list[str]
+  last_fetched : str | None
+  products : list[dict]
+  all_ingredients() -> set[str]
+  attr_slug(display_name: str, attribute_slugs: dict[str, str]) -> str
+  fetch(woo: WooClient, term_slugs: dict | None)
+  get_diy_volumes(attribute_slugs: dict[str, str]) -> dict
+  get_preset_recipes(attribute_slugs: dict[str, str]) -> dict
+  load(path: Path) -> 'StoreConfig'
+  parse_cl_to_ml(val) -> float
+  product_by_id(product_id: int) -> dict | None
+  save()
+}
+class "UIEvent" as barbot_fsm.UIEvent {
+}
+class "WooClient" as woo_client.WooClient {
+  batch_update_products(updates: list[dict]) -> bool
+  batch_update_variations(parent_id: int, updates: list[dict]) -> bool
+  fetch_all(endpoint: str, params: dict | None) -> list[dict]
+  get(endpoint: str, params: dict | None)
+  post(endpoint: str, data: dict)
+  put(endpoint: str, data: dict)
+  send_heartbeat()
+  update_order_status(order_id: int, status: str, retries: int) -> bool
+  update_term_viscosity(attribute_id: int, term_id: int, viscosity: float) -> bool
+}
+class "_SimScale" as hardware_dummy._SimScale {
+  read() -> float
+  remove_cup() -> None
+  set_cup(weight_g: float) -> None
+  start_fill(rate_g_per_s: float) -> None
+  stop_fill() -> None
+  tare() -> None
+}
+barbot_fsm.MenuSelectEvent --|> barbot_fsm.UIEvent
+barbot_fsm.PressEvent --|> barbot_fsm.UIEvent
+hardware_dummy.DummyLED --|> interfaces.AbstractLED
+hardware_dummy.DummyMachine --|> interfaces.AbstractMachine
+interfaces.AbstractLED --o barbot_fsm.BarbotFSM : led
+interfaces.AbstractMachine --o barbot_fsm.BarbotFSM : machine
+inventory.InventoryManager --o barbot_fsm.BarbotFSM : inventory
+mixer.DrinkResolver --o barbot_fsm.BarbotFSM : resolver
+repository.BarbotRepository --o barbot_fsm.BarbotFSM : repo
+@enduml

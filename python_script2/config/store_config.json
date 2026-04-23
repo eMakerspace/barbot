@@ -1,5 +1,5 @@
 {
-    "last_fetched": "2026-04-11T18:24:18.058846+00:00",
+    "last_fetched": "2026-04-23T07:41:51.262806+00:00",
     "available_spirits": [
         "gin",
         "jaegermeister",
@@ -233,7 +233,7 @@
             "sku": "DRINK-497",
             "type": "simple",
             "status": "publish",
-            "stock_status": "instock",
+            "stock_status": "outofstock",
             "attributes": [
                 {
                     "name": "pa_spirits",
@@ -277,7 +277,7 @@
             "sku": "DRINK-453",
             "type": "simple",
             "status": "publish",
-            "stock_status": "instock",
+            "stock_status": "outofstock",
             "attributes": [
                 {
                     "name": "pa_spirits",
@@ -373,7 +373,7 @@
             "sku": "DRINK-24",
             "type": "simple",
             "status": "publish",
-            "stock_status": "instock",
+            "stock_status": "outofstock",
             "attributes": [
                 {
                     "name": "pa_spirits",

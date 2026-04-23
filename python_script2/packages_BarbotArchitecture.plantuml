@@ -1,0 +1,48 @@
+@startuml packages_BarbotArchitecture
+set namespaceSeparator none
+package "barbot_fsm" as barbot_fsm {
+}
+package "hardware_dummy" as hardware_dummy {
+}
+package "interfaces" as interfaces {
+}
+package "inventory" as inventory {
+}
+package "lcd_menu" as lcd_menu {
+}
+package "main" as main {
+}
+package "mixer" as mixer {
+}
+package "orders" as orders {
+}
+package "progress" as progress {
+}
+package "repository" as repository {
+}
+package "store" as store {
+}
+package "woo_client" as woo_client {
+}
+barbot_fsm --> hardware_dummy
+barbot_fsm --> interfaces
+barbot_fsm --> inventory
+barbot_fsm --> mixer
+barbot_fsm --> orders
+barbot_fsm --> repository
+hardware_dummy --> interfaces
+inventory --> repository
+main --> barbot_fsm
+main --> hardware_dummy
+main --> inventory
+main --> lcd_menu
+main --> mixer
+main --> repository
+main --> store
+main --> woo_client
+mixer --> repository
+orders --> repository
+repository --> store
+repository --> woo_client
+store --> woo_client
+@enduml

@@ -5,7 +5,7 @@ web_configurator/*.png
 python_script/output.json
 storage.db
 *.log
-
+venv/
 # For PCBs designed using KiCad: https://www.kicad.org/
 # Format documentation: https://kicad.org/help/file-formats/
 
