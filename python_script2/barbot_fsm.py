@@ -158,6 +158,12 @@ def steps_from_spec(spec: DrinkSpec) -> list[DispenseStep]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CupCheckThread:
+    """
+    Background thread that monitors cup presence during dispensing.
+    Thread-safe: calls AbstractMachine.cup_present() which must be thread-safe
+    (guarded by its own lock). Signals emergency stop via threading.Event if cup
+    is removed while active.
+    """
     def __init__(self, machine: AbstractMachine, emergency_stop: threading.Event):
         self._machine        = machine
         self._emergency_stop = emergency_stop
@@ -863,7 +869,7 @@ class BarbotFSM:
         except MixerStall as exc:
             log.warning("[FSM:POUR_MIXER] Stall: %s", exc)
             self.machine.stop_pump()
-            self._go(State.MIXER_ERROR, "stall")
+            self._go(State.MIXER_ERROR, "bottle empty or pipe blocked")
             return
         if self._emergency_stop.is_set():
             self._go(State.STOP, "cup removed after pour")

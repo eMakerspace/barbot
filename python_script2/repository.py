@@ -30,6 +30,12 @@ class BarbotRepository:
     Facade over WooClient + StoreConfig + AttributesConfig + BarbotConfig.
     Injected into every class that needs data access so WooClient never
     leaks into FSM, inventory, or resolver logic directly.
+
+    SCALABILITY NOTE: This class currently handles network I/O (WooClient),
+    file persistence (StoreConfig, AttributesConfig, BarbotConfig), and
+    some business logic (slot/viscosity). If this grows beyond ~700 lines,
+    consider splitting into HardwareMapper (slot/viscosity) and
+    CloudSyncService (Woo integration), with the Repository as facade.
     """
 
     def __init__(

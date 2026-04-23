@@ -113,6 +113,9 @@ class DummyMachine(AbstractMachine):
     Owns the scale internally – callers request a target weight via
     pour_mixer() and this class handles the closed-loop fill control.
     No external object holds a scale reference.
+
+    Thread-safe: all hardware access is guarded by _hw_lock to prevent
+    race conditions between the FSM main thread and CupCheckThread.
     """
 
     _STEPS_PER_S = 3000
@@ -137,45 +140,52 @@ class DummyMachine(AbstractMachine):
         }
         self._cup               = False
         self._scale             = _SimScale()
+        self._hw_lock           = threading.Lock()
         log.info("[MACHINE] Initialised – x_max=%d  x_idle=%d  pour=%dms  settle=%dms",
                  x_max, x_idle, pour_duration_ms, settle_duration_ms)
 
     # ── Cup sensor ───────────────────────────────────────────────────────────
 
     def cup_present(self) -> bool:
-        log.debug("[MACHINE] Cup sensor: %s", "PRESENT" if self._cup else "ABSENT")
-        return self._cup
+        with self._hw_lock:
+            log.debug("[MACHINE] Cup sensor: %s", "PRESENT" if self._cup else "ABSENT")
+            return self._cup
 
     def simulate_cup_placed(self, cup_weight_g: float = 180.0) -> None:
-        log.info("[MACHINE] [SIM] Cup placed (%.1f g)", cup_weight_g)
-        self._cup = True
-        self._scale.set_cup(cup_weight_g)
+        with self._hw_lock:
+            log.info("[MACHINE] [SIM] Cup placed (%.1f g)", cup_weight_g)
+            self._cup = True
+            self._scale.set_cup(cup_weight_g)
 
     def simulate_cup_removed(self) -> None:
-        log.info("[MACHINE] [SIM] Cup removed")
-        self._cup = False
-        self._scale.remove_cup()
+        with self._hw_lock:
+            log.info("[MACHINE] [SIM] Cup removed")
+            self._cup = False
+            self._scale.remove_cup()
 
     # ── Motion ───────────────────────────────────────────────────────────────
 
     def homing(self) -> None:
-        log.info("[MACHINE] ── Homing started ──")
-        travel_s = self._x_position / self._STEPS_PER_S
-        time.sleep(min(travel_s, 0.4))
-        self._x_position = 0
-        log.info("[MACHINE] Endstop hit – zeroed")
+        with self._hw_lock:
+            log.info("[MACHINE] ── Homing started ──")
+            travel_s = self._x_position / self._STEPS_PER_S
+            time.sleep(min(travel_s, 0.4))
+            self._x_position = 0
+            log.info("[MACHINE] Endstop hit – zeroed")
         self.move_to(self._x_idle)
-        log.info("[MACHINE] ── Homing complete – pos=%d ──", self._x_position)
+        with self._hw_lock:
+            log.info("[MACHINE] ── Homing complete – pos=%d ──", self._x_position)
 
     def move_to(self, target_steps: int) -> None:
-        target = max(0, min(self._x_max, target_steps))
-        dist   = abs(target - self._x_position)
-        travel = dist / self._STEPS_PER_S
-        log.info("[MACHINE] Move X: %d → %d  (Δ%d steps  %.2fs)",
-                 self._x_position, target, dist, travel)
-        time.sleep(min(travel, 0.3))
-        self._x_position = target
-        log.info("[MACHINE] Arrived at %d", self._x_position)
+        with self._hw_lock:
+            target = max(0, min(self._x_max, target_steps))
+            dist   = abs(target - self._x_position)
+            travel = dist / self._STEPS_PER_S
+            log.info("[MACHINE] Move X: %d → %d  (Δ%d steps  %.2fs)",
+                     self._x_position, target, dist, travel)
+            time.sleep(min(travel, 0.3))
+            self._x_position = target
+            log.info("[MACHINE] Arrived at %d", self._x_position)
 
     def move_to_idle(self) -> None:
         log.info("[MACHINE] Moving to idle (%d)", self._x_idle)
@@ -190,7 +200,8 @@ class DummyMachine(AbstractMachine):
 
     @property
     def x_position(self) -> int:
-        return self._x_position
+        with self._hw_lock:
+            return self._x_position
 
     @property
     def x_max(self) -> int:
@@ -199,72 +210,77 @@ class DummyMachine(AbstractMachine):
     # ── Dispensing ───────────────────────────────────────────────────────────
 
     def pour_spirit(self, slot: str, pours: int, viscosity: float = 1.0) -> None:
-        duration_ms = self._pour_ms * viscosity
-        log.info("[MACHINE] Spirit pour – slot=%s  pours=%d  viscosity=%.2f  %.0fms/pour",
-                 slot, pours, viscosity, duration_ms)
-        for i in range(1, pours + 1):
-            log.info("[MACHINE]   Pour %d/%d – opening solenoid %.0fms…", i, pours, duration_ms)
-            time.sleep(duration_ms / 1000)
-            log.info("[MACHINE]   Pour %d/%d – settling %dms", i, pours, self._settle_ms)
-            time.sleep(self._settle_ms / 1000)
-        log.info("[MACHINE] Spirit pour complete – slot=%s", slot)
+        with self._hw_lock:
+            duration_ms = self._pour_ms * viscosity
+            log.info("[MACHINE] Spirit pour – slot=%s  pours=%d  viscosity=%.2f  %.0fms/pour",
+                     slot, pours, viscosity, duration_ms)
+            for i in range(1, pours + 1):
+                log.info("[MACHINE]   Pour %d/%d – opening solenoid %.0fms…", i, pours, duration_ms)
+                time.sleep(duration_ms / 1000)
+                log.info("[MACHINE]   Pour %d/%d – settling %dms", i, pours, self._settle_ms)
+                time.sleep(self._settle_ms / 1000)
+            log.info("[MACHINE] Spirit pour complete – slot=%s", slot)
 
     def pour_mixer(self, slot: str, target_g: float) -> None:
-        log.info("[MACHINE] Mixer pour – slot=%s  target=%.1fg", slot, target_g)
-        start_g   = self._scale.read()
-        remaining = target_g - start_g
-        if remaining <= 0:
-            log.info("[MACHINE] Already at target weight – skipping pump")
-            return
+        with self._hw_lock:
+            log.info("[MACHINE] Mixer pour – slot=%s  target=%.1fg", slot, target_g)
+            start_g   = self._scale.read()
+            remaining = target_g - start_g
+            if remaining <= 0:
+                log.info("[MACHINE] Already at target weight – skipping pump")
+                return
 
-        log.info("[MACHINE] Starting pump – need %.1fg more (current=%.1fg)",
-                 remaining, start_g)
-        self._scale.start_fill(rate_g_per_s=8.0)
+            log.info("[MACHINE] Starting pump – need %.1fg more (current=%.1fg)",
+                     remaining, start_g)
+            self._scale.start_fill(rate_g_per_s=8.0)
 
-        poll     = 0.2
-        timeout  = remaining / 8.0 + 10
-        deadline = time.monotonic() + timeout
-        last_g   = start_g
-        stall_t: float | None = None
+            poll     = 0.2
+            timeout  = remaining / 8.0 + 10
+            deadline = time.monotonic() + timeout
+            last_g   = start_g
+            stall_t: float | None = None
 
-        try:
-            while True:
-                time.sleep(poll)
-                cur = self._scale.read()
-                log.debug("[MACHINE] Pump weight %.2fg / %.1fg", cur, target_g)
+            try:
+                while True:
+                    time.sleep(poll)
+                    cur = self._scale.read()
+                    log.debug("[MACHINE] Pump weight %.2fg / %.1fg", cur, target_g)
 
-                if cur >= target_g:
-                    log.info("[MACHINE] Target reached – stopping pump (final=%.2fg)", cur)
-                    return
+                    if cur >= target_g:
+                        log.info("[MACHINE] Target reached – stopping pump (final=%.2fg)", cur)
+                        return
 
-                if abs(cur - last_g) < 0.5:
-                    if stall_t is None:
-                        stall_t = time.monotonic()
-                    elif time.monotonic() - stall_t > 3.0:
-                        log.warning("[MACHINE] STALL – weight stuck at %.2fg", cur)
-                        raise MixerStall(
-                            f"Pump stalled at {cur:.1f}g (target {target_g:.1f}g)")
-                else:
-                    stall_t = None
-                last_g = cur
+                    if abs(cur - last_g) < 0.5:
+                        if stall_t is None:
+                            stall_t = time.monotonic()
+                        elif time.monotonic() - stall_t > 3.0:
+                            log.warning("[MACHINE] STALL – weight stuck at %.2fg", cur)
+                            raise MixerStall(
+                                f"Pump stalled at {cur:.1f}g (target {target_g:.1f}g)")
+                    else:
+                        stall_t = None
+                    last_g = cur
 
-                if time.monotonic() > deadline:
-                    log.error("[MACHINE] Pump timeout")
-                    raise MixerStall("Pump timeout")
-        finally:
-            self._scale.stop_fill()
+                    if time.monotonic() > deadline:
+                        log.error("[MACHINE] Pump timeout")
+                        raise MixerStall("Pump timeout")
+            finally:
+                self._scale.stop_fill()
 
     def stop_pump(self) -> None:
-        log.warning("[MACHINE] EMERGENCY – pump stopped")
-        self._scale.stop_fill()
+        with self._hw_lock:
+            log.warning("[MACHINE] EMERGENCY – pump stopped")
+            self._scale.stop_fill()
 
     # ── Scale (maintenance access only) ──────────────────────────────────────
 
     def tare_scale(self) -> None:
-        log.info("[MACHINE] Tare scale")
-        self._scale.tare()
+        with self._hw_lock:
+            log.info("[MACHINE] Tare scale")
+            self._scale.tare()
 
     def read_weight(self) -> float:
-        g = self._scale.read()
-        log.info("[MACHINE] Scale read: %.2fg", g)
-        return g
+        with self._hw_lock:
+            g = self._scale.read()
+            log.info("[MACHINE] Scale read: %.2fg", g)
+            return g
