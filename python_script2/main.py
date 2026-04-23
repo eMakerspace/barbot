@@ -16,6 +16,7 @@ Dependency graph:
 import logging
 
 from config import BarbotConfig, AttributesConfig, HardwareConfig, load_env, init_missing_configs
+from serial_probe import probe_and_update
 from store import StoreConfig
 from woo_client import WooClient
 from repository import BarbotRepository
@@ -34,6 +35,11 @@ logging.basicConfig(
 
 def main():
     init_missing_configs()
+
+    # Identify which serial port belongs to which firmware before loading config.
+    # Detected ports are written back into hardware_config.json automatically.
+    probe_and_update()
+
     env        = load_env()
     config     = BarbotConfig.load()
     hw_config  = HardwareConfig.load()

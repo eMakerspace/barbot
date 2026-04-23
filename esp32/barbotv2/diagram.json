@@ -11,11 +11,11 @@
       "attrs": { "serialInterface": "USB_SERIAL_JTAG" }
     },
     {
-      "type": "wokwi-led",
-      "id": "led1",
-      "top": 34.8,
-      "left": 407.4,
-      "attrs": { "color": "green", "flip": "1" }
+      "type": "wokwi-servo",
+      "id": "servo1",
+      "top": -80,
+      "left": 390,
+      "attrs": {}
     },
     { "type": "wokwi-gnd", "id": "gnd2", "top": 144, "left": 373.8, "attrs": {} },
     { "type": "wokwi-a4988", "id": "drv1", "top": 52.8, "left": -244.8, "attrs": {} },
@@ -90,41 +90,7 @@
       "rotate": 90,
       "attrs": { "text": "PUMP_CTRL3" }
     },
-    { "type": "wokwi-neopixel", "id": "rgb1", "top": -22.7, "left": 210.2, "attrs": {} },
-    { "type": "wokwi-neopixel", "id": "rgb2", "top": -70.7, "left": 210.2, "attrs": {} },
-    { "type": "wokwi-gnd", "id": "gnd6", "top": 0, "left": 229.8, "attrs": {} },
-    { "type": "wokwi-vcc", "id": "vcc3", "top": -248.84, "left": 172.8, "attrs": {} },
-    {
-      "type": "wokwi-led-ring",
-      "id": "ring1",
-      "top": -282.71,
-      "left": 264.66,
-      "rotate": 90,
-      "attrs": { "pixels": "16" }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led6",
-      "top": 34.8,
-      "left": 445.8,
-      "attrs": { "color": "red", "flip": "1" }
-    },
-    {
-      "type": "wokwi-text",
-      "id": "text5",
-      "top": -57.6,
-      "left": 374.4,
-      "rotate": 90,
-      "attrs": { "text": "MOTOR_Z_UP" }
-    },
-    {
-      "type": "wokwi-text",
-      "id": "text6",
-      "top": -48,
-      "left": 403.2,
-      "rotate": 90,
-      "attrs": { "text": "MOTOR_Z_DOWN" }
-    },
+
     { "type": "wokwi-gnd", "id": "gnd1", "top": 182.9, "left": 125.1, "rotate": 90, "attrs": {} },
     {
       "type": "wokwi-text",
@@ -181,22 +147,13 @@
     [ "led2:C", "gnd5:GND", "black", [ "v9.6", "h-86" ] ],
     [ "led4:C", "gnd5:GND", "black", [ "v9.6", "h-57.2" ] ],
     [ "led3:C", "gnd5:GND", "black", [ "v9.6", "h-28.4" ] ],
-    [ "rgb1:DIN", "esp:D0", "green", [ "h18.4", "v76.8" ] ],
-    [ "rgb1:DOUT", "rgb2:DIN", "green", [ "h-9.6", "v-29.7", "h48", "v-19.2" ] ],
-    [ "rgb1:VSS", "gnd6:GND", "black", [ "h8.8", "v8.7" ] ],
-    [ "gnd6:GND", "rgb2:VSS", "black", [ "v0" ] ],
-    [ "rgb2:VDD", "vcc3:VCC", "red", [ "h0" ] ],
-    [ "rgb1:VDD", "vcc3:VCC", "red", [ "h0" ] ],
-    [ "rgb2:DOUT", "ring1:DIN", "green", [ "h-9.6", "v-77.7" ] ],
-    [ "ring1:VCC", "vcc3:VCC", "red", [ "h0" ] ],
-    [ "ring1:GND", "gnd6:GND", "black", [ "h0" ] ],
-    [ "esp:D8", "led6:A", "orange", [ "h0" ] ],
-    [ "gnd2:GND", "led1:C", "black", [ "v-28.8", "h48.4" ] ],
-    [ "gnd2:GND", "led6:C", "black", [ "v-28.8", "h86.4" ] ],
-    [ "led1:A", "esp:D10", "orange", [ "v0" ] ],
+
+    [ "servo1:PWM", "esp:D9", "orange", [ "v0" ] ],
+    [ "servo1:V+", "vcc1:VCC", "red", [ "h0" ] ],
+    [ "servo1:GND", "gnd2:GND", "black", [ "h0" ] ],
     [ "sw1:2", "esp:D5", "orange", [ "v0" ] ],
     [ "gnd1:GND", "sw1:3", "black", [ "v0", "h28.8" ] ],
-    [ "sw2:2", "esp:D9", "green", [ "v0" ] ],
+    [ "sw2:2", "esp:D0", "green", [ "v0" ] ],
     [ "gnd1:GND", "sw2:3", "black", [ "v0", "h182.4" ] ]
   ],
   "serialMonitor": { "convertEol": true, "display": "terminal", "newline": "cr" },

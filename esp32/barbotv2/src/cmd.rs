@@ -25,8 +25,8 @@ pub type StopCmdImmediatePub =
 
 #[derive(Debug)]
 pub enum StepperCmd {
-    GoTo(i32),
-    GoToRangeFact(f32),
+    GoTo(i32, Option<crate::stepper::AccelSpeedConfig>),
+    GoToRangeFact(f32, Option<crate::stepper::AccelSpeedConfig>),
     Home(),
 }
 pub type StepperCmdSignal = BiSignal<StepperCmd>;
@@ -40,18 +40,16 @@ pub struct PumpCmd {
 pub type PumpCmdSignal = BiSignal<PumpCmd>;
 
 #[derive(Debug)]
-pub struct LiftMotorCmd {
-    pub direction_up: bool,
-    pub duration_ms: u32,
+pub struct ServoCmd {
+    pub angle: u8,
 }
-pub type LiftMotorCmdSignal = BiSignal<LiftMotorCmd>;
+pub type ServoCmdSignal = BiSignal<ServoCmd>;
 
 #[derive(Debug)]
 pub enum Cmd {
     Stepper(StepperCmd),
     Pump(PumpCmd),
-    Led(),
-    LiftMotor(LiftMotorCmd),
+    Servo(ServoCmd),
     Wait(u32),
 }
 pub type CmdChannel = Channel<CriticalSectionRawMutex, Cmd, 128>;

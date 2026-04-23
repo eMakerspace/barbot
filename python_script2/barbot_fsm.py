@@ -153,6 +153,11 @@ def steps_from_spec(spec: DrinkSpec) -> list[DispenseStep]:
     return steps
 
 
+# How long the cup must be continuously absent before triggering emergency stop,
+# and how long it must be continuously present before we consider it placed.
+CUP_DEBOUNCE_S = 1.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Cup-check background thread
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,9 +165,9 @@ def steps_from_spec(spec: DrinkSpec) -> list[DispenseStep]:
 class CupCheckThread:
     """
     Background thread that monitors cup presence during dispensing.
-    Thread-safe: calls AbstractMachine.cup_present() which must be thread-safe
-    (guarded by its own lock). Signals emergency stop via threading.Event if cup
-    is removed while active.
+    Triggers emergency stop only after the cup has been absent for
+    CUP_DEBOUNCE_S seconds straight – prevents false alarms from a
+    noisy sensor.
     """
     def __init__(self, machine: AbstractMachine, emergency_stop: threading.Event):
         self._machine        = machine
@@ -190,12 +195,24 @@ class CupCheckThread:
         self._thread.join(timeout=2)
 
     def _run(self):
+        absent_since: float | None = None
+        poll = 0.05
         while not self._stop.is_set():
-            if self._active.is_set() and not self._machine.cup_present():
-                if not self._emergency_stop.is_set():
-                    log.warning("[CUP_THREAD] !! Cup removed – EMERGENCY STOP !!")
-                    self._emergency_stop.set()
-            time.sleep(0.05)
+            if self._active.is_set():
+                if self._machine.cup_present():
+                    absent_since = None
+                else:
+                    now = time.monotonic()
+                    if absent_since is None:
+                        absent_since = now
+                    elif now - absent_since >= CUP_DEBOUNCE_S:
+                        if not self._emergency_stop.is_set():
+                            log.warning("[CUP_THREAD] !! Cup absent >%.1fs – EMERGENCY STOP !!",
+                                        CUP_DEBOUNCE_S)
+                            self._emergency_stop.set()
+            else:
+                absent_since = None
+            time.sleep(poll)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -255,7 +272,58 @@ class BarbotFSM:
         # Heartbeat service
         self._heartbeat = HeartbeatService(repo)
 
+        # LED: track last-sent mode+order_num so we only call led.set() on change
+        self._led_mode:      str       = ""
+        self._led_order_num: int | None = None
+
         log.info("[FSM] BarbotFSM initialised")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # LED helper – only sends a command when mode or order_num changes
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _set_led(self, mode: str, order_num: int | None = None) -> None:
+        if mode == self._led_mode and order_num == self._led_order_num:
+            return
+        self._led_mode      = mode
+        self._led_order_num = order_num
+        self.led.set(mode, order_num)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cup-presence helpers with FSM-side debounce
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _wait_for_cup_present(self, poll: float = 0.05) -> None:
+        """Block until cup_present() is True for CUP_DEBOUNCE_S straight."""
+        stable_since: float | None = None
+        while True:
+            if self._state in (State.EXIT, State.CLEANUP):
+                return
+            if self.machine.cup_present():
+                now = time.monotonic()
+                if stable_since is None:
+                    stable_since = now
+                elif now - stable_since >= CUP_DEBOUNCE_S:
+                    return
+            else:
+                stable_since = None
+            time.sleep(poll)
+
+    def _wait_for_cup_absent(self, poll: float = 0.05) -> None:
+        """Block until cup_present() is False for CUP_DEBOUNCE_S straight."""
+        stable_since: float | None = None
+        while True:
+            if self._state in (State.EXIT, State.CLEANUP):
+                return
+            if not self.machine.cup_present():
+                now = time.monotonic()
+                if stable_since is None:
+                    stable_since = now
+                elif now - stable_since >= CUP_DEBOUNCE_S:
+                    return
+            else:
+                stable_since = None
+            time.sleep(poll)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public entry point
@@ -397,7 +465,7 @@ class BarbotFSM:
 
     def _s_homing(self):
         log.info("[FSM:HOMING] Starting homing sequence")
-        self.led.set("idle")
+        self._set_led("idle")
         if self.ui:
             self.ui.show_working("Homing...")
         self.machine.homing()
@@ -428,7 +496,7 @@ class BarbotFSM:
 
     def _s_main_menu(self):
         log.info("[FSM:MAIN_MENU] Showing main menu")
-        self.led.set("idle")
+        self._set_led("idle")
         self._mode = Mode.RUN
         self._drain_queue()
         if self.ui:
@@ -606,7 +674,7 @@ class BarbotFSM:
 
     def _s_maintenance(self):
         log.info("[FSM:MAINTENANCE] Showing maintenance menu")
-        self.led.set("idle")
+        self._set_led("idle")
         self._drain_queue()
         if self.ui:
             self.ui.show_menu('Maintenance', [
@@ -743,15 +811,14 @@ class BarbotFSM:
 
     def _s_verify_cup_mounted(self):
         log.info("[FSM:VERIFY_CUP_MOUNTED] Checking cup before clean")
-        self.led.set("cup_missing")
+        self._set_led("cup_missing")
         if self.ui:
             self.ui.show_working("Place cup...")
         if not self.machine.cup_present():
-            log.warning("[FSM:VERIFY_CUP_MOUNTED] Cup missing – sim: auto-place")
+            log.warning("[FSM:VERIFY_CUP_MOUNTED] Cup missing – waiting")
             self.machine.simulate_cup_placed()
-            time.sleep(0.3)
-        if self.machine.cup_present():
-            self._go(State.START_CUP_THREAD_CLEAN, "cup mounted")
+        self._wait_for_cup_present()
+        self._go(State.START_CUP_THREAD_CLEAN, "cup mounted")
 
     def _s_start_cup_thread_clean(self):
         log.info("[FSM:START_CUP_THREAD_CLEAN] Arming emergency-stop")
@@ -767,7 +834,7 @@ class BarbotFSM:
 
     def _s_run_idle(self):
         log.info("[FSM:RUN_IDLE] Idle")
-        self.led.set("idle")
+        self._set_led("idle")
         self._mode = Mode.RUN
         if self.ui:
             self.ui.show_run(self._run_count, None)
@@ -779,11 +846,10 @@ class BarbotFSM:
 
     def _s_wait_for_cup_addition(self):
         log.info("[FSM:WAIT_FOR_CUP_ADDITION] Waiting for cup")
-        self.led.set("cup_missing")
+        self._set_led("cup_missing")
         self.machine.simulate_cup_placed()
-        time.sleep(0.3)
-        if self.machine.cup_present():
-            self._go(State.RUN_IDLE, "cup placed")
+        self._wait_for_cup_present()
+        self._go(State.RUN_IDLE, "cup placed")
 
     def _s_check_order(self):
         log.info("[FSM:CHECK_ORDER] Polling orders")
@@ -832,7 +898,7 @@ class BarbotFSM:
         step = self._current_step
         log.info("[FSM:MOVE_TO_POS] Step %d/%d – %s",
                  self._step_index + 1, len(self._steps), step.label())
-        self.led.set("pouring")
+        self._set_led("moving")
         if self._emergency_stop.is_set():
             self._go(State.STOP, "emergency stop")
             return
@@ -849,6 +915,7 @@ class BarbotFSM:
     def _s_pour_spirit(self):
         step = self._current_step
         log.info("[FSM:POUR_SPIRIT] %s", step.label())
+        self._set_led("pouring")
         if self._emergency_stop.is_set():
             self._go(State.STOP, "cup removed")
             return
@@ -861,6 +928,8 @@ class BarbotFSM:
     def _s_pour_mixer(self):
         step = self._current_step
         log.info("[FSM:POUR_MIXER] %s", step.label())
+        order_num = (self._order_id % 100) if self._order_id is not None else None
+        self._set_led("mixing", order_num)
         if self._emergency_stop.is_set():
             self._go(State.STOP, "cup removed")
             return
@@ -886,7 +955,8 @@ class BarbotFSM:
 
     def _s_move_to_idle(self):
         log.info("[FSM:MOVE_TO_IDLE] Returning to idle")
-        self.led.set("finished")
+        order_num = (self._order_id % 100) if self._order_id is not None else None
+        self._set_led("finished", order_num)
         self.machine.move_to_idle()
         self._cup_thread.deactivate()
         self._go(State.WAIT_FOR_CUP_REMOVAL, "idle reached")
@@ -897,7 +967,7 @@ class BarbotFSM:
 
     def _s_mixer_error(self):
         log.warning("[FSM:MIXER_ERROR] Bottle empty or pipe stuck")
-        self.led.set("warning")
+        self._set_led("warning")
         if self.ui:
             self.ui.show_info('Mixer Error',
                               ['Bottle empty or', 'pipe stuck!', 'Fix & press OK', ''])
@@ -906,7 +976,7 @@ class BarbotFSM:
 
     def _s_verify_cup_before_resume(self):
         log.info("[FSM:VERIFY_CUP_BEFORE_RESUME] Checking cup")
-        self.led.set("cup_missing")
+        self._set_led("cup_missing")
         if not self.machine.cup_present():
             self.machine.simulate_cup_placed()
             time.sleep(0.3)
@@ -918,7 +988,7 @@ class BarbotFSM:
                 kind="mixer", slot=self._current_step.slot,
                 ingredient=self._current_step.ingredient, grams=remaining,
             )
-            self.led.set("pouring")
+            self._set_led("pouring")
             self._go(State.POUR_MIXER, "resume")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -927,7 +997,7 @@ class BarbotFSM:
 
     def _s_stop(self):
         log.error("[FSM:STOP] !! EMERGENCY STOP !!")
-        self.led.set("emergency")
+        self._set_led("emergency")
         self.machine.stop_pump()
         self.machine.move_to_idle()
         if self.ui:
@@ -937,11 +1007,10 @@ class BarbotFSM:
 
     def _s_wait_for_cup_added(self):
         log.info("[FSM:WAIT_FOR_CUP_ADDED] Waiting for cup")
-        self.led.set("cup_missing")
+        self._set_led("cup_missing")
         self.machine.simulate_cup_placed()
-        time.sleep(0.5)
-        if self.machine.cup_present():
-            self._go(State.DISARM_EMERGENCY_STOP, "cup added")
+        self._wait_for_cup_present()
+        self._go(State.DISARM_EMERGENCY_STOP, "cup added")
 
     def _s_disarm_emergency_stop(self):
         log.info("[FSM:DISARM_EMERGENCY_STOP] Clearing emergency stop")
@@ -966,11 +1035,11 @@ class BarbotFSM:
 
     def _s_wait_for_cup_removal(self):
         log.info("[FSM:WAIT_FOR_CUP_REMOVAL] Waiting for cup removal")
-        self.led.set("finished")
+        order_num = (self._order_id % 100) if self._order_id is not None else None
+        self._set_led("finished", order_num)
         self.machine.simulate_cup_removed()
-        time.sleep(0.5)
-        if not self.machine.cup_present():
-            self._go(State.AFTER_CUP_REMOVAL_ROUTING, "removed")
+        self._wait_for_cup_absent()
+        self._go(State.AFTER_CUP_REMOVAL_ROUTING, "removed")
 
     def _s_after_cup_removal_routing(self):
         if self._mode == Mode.RUN:
@@ -980,11 +1049,10 @@ class BarbotFSM:
 
     def _s_wait_for_new_cup_added(self):
         log.info("[FSM:WAIT_FOR_NEW_CUP_ADDED] Waiting for fresh cup")
-        self.led.set("cup_missing")
+        self._set_led("cup_missing")
         self.machine.simulate_cup_placed()
-        time.sleep(0.4)
-        if self.machine.cup_present():
-            self._go(State.CHECK_FOR_OTHER_DRINKS)
+        self._wait_for_cup_present()
+        self._go(State.CHECK_FOR_OTHER_DRINKS)
 
     def _s_check_for_other_drinks(self):
         next_i = self._drink_index + 1
@@ -1005,7 +1073,7 @@ class BarbotFSM:
 
     def _s_cleanup(self):
         log.info("[FSM:CLEANUP] Global cleanup")
-        self.led.set("emergency")
+        self._set_led("emergency")
         try:
             self.machine.stop_pump()
         except Exception:
@@ -1015,7 +1083,7 @@ class BarbotFSM:
         except Exception:
             pass
         self._cup_thread.deactivate()
-        self.led.set("idle")
+        self._set_led("idle")
         if self.ui:
             self.ui.shutdown()
         self._go(State.EXIT, "clean exit")

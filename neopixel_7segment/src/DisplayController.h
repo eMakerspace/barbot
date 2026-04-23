@@ -11,20 +11,28 @@
 class DisplayController {
 public:
     enum class Mode : uint8_t {
-        Static,    // static number
-        Blinking,  // number blinks on/off
-        Breathing, // number breathes (continuous sine fade)
-        Animating, // segment-only idle animations (~6.75 min cycle)
-        Cup        // falling-cup animation on ones display (5 s cycle)
+        Static,      // static number
+        Blinking,    // number blinks on/off
+        Breathing,   // number breathes (continuous sine fade)
+        Animating,   // segment-only idle animations (~6.75 min cycle)
+        Cup,         // falling-cup animation on ones display (5 s cycle)
+        Counting,    // counts 00→99→00 at a fixed takt
+        DrinkReady,  // escalating blink: slow→fast over 5s, repeating
+        Working,     // work-in-progress animation: cyan/blue spinning
+        EStop        // emergency stop: fast-blinking "E" on both digits
     };
 
     explicit DisplayController(SevenSegmentDriver &driver) : driver_(driver) {}
 
-    void setStatic   (uint8_t value);
-    void setBlinking (uint8_t value);
-    void setBreathing(uint8_t value);
-    void setAnimating();
-    void setCup();
+    void setStatic      (uint8_t value);
+    void setBlinking    (uint8_t value);
+    void setBreathing   (uint8_t value);
+    void setAnimating   ();
+    void setCup         ();
+    void setCounting    (uint32_t takt_ms = 400);
+    void setDrinkReady  (uint8_t value);
+    void setWorking     ();
+    void setEStop       ();
 
     // Call from loop() on every iteration to advance animation state.
     void tick();
@@ -47,6 +55,12 @@ private:
     void updateBreathing();
     void updateAnimating();
     void updateCup();
+    void updateCounting();
+    void updateDrinkReady();
+    void updateWorking();
+    void updateEStop();
+
+    uint32_t taktMs_ = 400;  // counting takt interval
 
     // -----------------------------------------------------------------------
     // Idle animation phase handlers (called from updateAnimating)
@@ -68,6 +82,7 @@ private:
     void phaseSegmentMorph       (uint32_t t);   // 14 – 30 s
     void phaseCascadeAcross      (uint32_t t);   // 15 – 30 s
     void phaseSnake              (uint32_t t);   // 16 – 35 s
+    void phaseSnakeEatsDot       (uint32_t t);   // 17 – 30 s
 
     // -----------------------------------------------------------------------
     // Helpers

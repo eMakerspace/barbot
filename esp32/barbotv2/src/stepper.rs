@@ -197,10 +197,29 @@ impl<'rmt> Stepper<'rmt> {
         }
     }
 
+    /// Get the configured acceleration/speed settings.
+    pub fn accel_speed(&self) -> AccelSpeedConfig {
+        self.accel_speed
+    }
+
     /// Run to the given `pos` in steps.
     pub async fn run_to_pos(&mut self, pos: i32) {
         let (dir, steps) = self.dir_and_steps_to_pos(pos);
         let actual_steps = self.run_steps(steps, dir).await;
+
+        self.curr_pos += if pos > self.curr_pos {
+            actual_steps as i32
+        } else {
+            -(actual_steps as i32)
+        };
+    }
+
+    /// Run to the given `pos` in steps with custom acceleration/speed config.
+    pub async fn run_to_pos_with_accel_speed(&mut self, pos: i32, accel_speed: AccelSpeedConfig) {
+        let (dir, steps) = self.dir_and_steps_to_pos(pos);
+        let dir_level = self.dir_to_level(dir);
+        self.last_dir = Some(dir);
+        let actual_steps = self.run_steps_with_level(steps, dir_level, accel_speed).await;
 
         self.curr_pos += if pos > self.curr_pos {
             actual_steps as i32

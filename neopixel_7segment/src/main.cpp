@@ -49,13 +49,25 @@ void setup() {
         0              // core 0
     );
 
+    Serial.println("BarBot 7-segment display");
     Serial.println("7-segment display ready.");
     Serial.println("Commands:");
-    Serial.println("  <number>   - display 0-99 (static)");
-    Serial.println("  -bl <num>  - blink number");
-    Serial.println("  -br <num>  - breathing effect");
-    Serial.println("  -i         - idle animations (~6 min 45 s cycle)");
-    Serial.println("  -c         - falling cup animation");
+    Serial.println("  <number>      - display 0-99 (static)");
+    Serial.println("  -bl <num>     - blink number");
+    Serial.println("  -br <num>     - breathing effect");
+    Serial.println("  -i            - idle animations (~6 min 45 s cycle)");
+    Serial.println("  -c            - falling cup animation");
+    Serial.println("  -bri <0-255>  - set LED strip brightness");
+    Serial.println("  -s            - fast red strobe (all LEDs)");
+    Serial.println("  -cnt          - count 00->99->00 at 0.4s takt");
+    Serial.println("  -mv           - moving to slot animation");
+    Serial.println("  -pour         - pouring spirit animation");
+    Serial.println("  -mix          - mixing/dispensing animation");
+    Serial.println("  -done         - drink done celebration");
+    Serial.println("  -w            - work-in-progress animation");
+    Serial.println("  -estop        - emergency stop: red strobe + 'E' on 7-seg");
+    Serial.println("  -cupwait      - waiting-for-cup alert (green ring, red background)");
+    Serial.println("  -e <effect>   - set fault/status effect (RED_SOLID, RED_FLASH_FAST, RED_PULSE, YELLOW_SOLID, ORANGE_FLASH, GREEN_SOLID, GREEN_FLASH_SLOW, GREEN_FLASH_FAST, IDLE)");
 }
 
 // ---------------------------------------------------------------------------
@@ -89,9 +101,112 @@ void loop() {
             case CommandType::Cup:
                 Serial.println("Cup animation...");
                 controller.setCup();
+                ledStrip.setCupAnim();
+                break;
+            case CommandType::Count:
+                Serial.println("Counting 00->99->00...");
+                controller.setCounting(400);
+                break;
+            case CommandType::Strobe:
+                Serial.println("Strobing red!");
+                ledStrip.setStrobe();
+                break;
+            case CommandType::Brightness:
+                Serial.print("Brightness: ");
+                Serial.println(cmd.value);
+                ledStrip.setBrightness(cmd.value);
+                break;
+            case CommandType::Moving:
+                Serial.println("Moving...");
+                ledStrip.setMoving();
+                break;
+            case CommandType::Pouring:
+                Serial.println("Pouring...");
+                ledStrip.setPouring();
+                break;
+            case CommandType::Mixing:
+                Serial.println("Mixing...");
+                ledStrip.setMixing();
+                break;
+            case CommandType::Done:
+                Serial.println("Done!");
+                ledStrip.setDone();
+                break;
+            case CommandType::Working:
+                Serial.println("Working...");
+                controller.setWorking();
+                ledStrip.setMixing();
+                break;
+            case CommandType::CupWait:
+                Serial.println("Cup wait alert...");
+                controller.setCup();
+                ledStrip.setCupWait();
+                break;
+            case CommandType::DrinkReady:
+                Serial.println("Drink ready!");
+                ledStrip.setDrinkReady();
+                break;
+            case CommandType::OverdueStrobe:
+                Serial.println("Overdue strobe!");
+                ledStrip.setOverdueStrobe();
+                break;
+            case CommandType::EStop:
+                Serial.println("Emergency Stop!");
+                controller.setEStop();
+                ledStrip.setEStop();
+                break;
+            case CommandType::DrinkReadyNum:
+                Serial.print("Drink ready num: ");
+                Serial.println(cmd.value);
+                controller.setDrinkReady(cmd.value);
+                break;
+            case CommandType::ErrorEffect: {
+                LedEffectCode effect = static_cast<LedEffectCode>(cmd.value);
+                switch (effect) {
+                    case LedEffectCode::Idle:
+                        Serial.println("Effect: IDLE");
+                        ledStrip.setIdle();
+                        break;
+                    case LedEffectCode::GreenSolid:
+                        Serial.println("Effect: GREEN_SOLID");
+                        ledStrip.setSolid(CRGB::Green);
+                        break;
+                    case LedEffectCode::RedSolid:
+                        Serial.println("Effect: RED_SOLID");
+                        ledStrip.setSolid(CRGB::Red);
+                        break;
+                    case LedEffectCode::RedFlashFast:
+                        Serial.println("Effect: RED_FLASH_FAST");
+                        ledStrip.setFlash(CRGB::Red, 90, 90);
+                        break;
+                    case LedEffectCode::RedPulse:
+                        Serial.println("Effect: RED_PULSE");
+                        ledStrip.setPulse(CRGB::Red, 1200);
+                        break;
+                    case LedEffectCode::YellowSolid:
+                        Serial.println("Effect: YELLOW_SOLID");
+                        ledStrip.setSolid(CRGB::Yellow);
+                        break;
+                    case LedEffectCode::OrangeFlash:
+                        Serial.println("Effect: ORANGE_FLASH");
+                        ledStrip.setFlash(CRGB(255, 120, 0), 140, 140);
+                        break;
+                    case LedEffectCode::GreenFlashSlow:
+                        Serial.println("Effect: GREEN_FLASH_SLOW");
+                        ledStrip.setFlash(CRGB::Green, 500, 500);
+                        break;
+                    case LedEffectCode::GreenFlashFast:
+                        Serial.println("Effect: GREEN_FLASH_FAST");
+                        ledStrip.setFlash(CRGB::Green, 100, 100);
+                        break;
+                }
+                break;
+            }
+            case CommandType::FirmwareInfo:
+                Serial.println("FIRMWARE_NAME:barbot-display FIRMWARE_VERSION:1.0");
                 break;
             case CommandType::Invalid:
-                Serial.println("Invalid command");
+                Serial.println("ERR: unknown command. Try: <num>, -bl <num>, -br <num>, -i, -c, -mv, -pour, -mix, -done, -cupwait, -e <effect>");
                 break;
         }
     }

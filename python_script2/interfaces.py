@@ -12,8 +12,22 @@ class AbstractLED(ABC):
     """LED strip firmware interface."""
 
     @abstractmethod
-    def set(self, mode: str) -> None:
-        """Set the animation mode: idle | cup_missing | pouring | finished | warning | emergency."""
+    def set(self, mode: str, order_num: int | None = None) -> None:
+        """
+        Set the LED animation mode. Implementations must be idempotent (no-op
+        when called with the same mode+order_num twice in a row).
+
+        Modes:
+          idle        – idle animations
+          cup_missing – waiting for cup (orange blink)
+          moving      – moving to slot
+          pouring     – pouring spirit
+          mixing      – dispensing mixer (order_num breathes on 7-seg)
+          finished    – drink done, waiting for cup removal
+                        (order_num blinks on 7-seg)
+          warning     – mixer stall / bottle empty
+          emergency   – emergency stop
+        """
 
 
 class AbstractMachine(ABC):

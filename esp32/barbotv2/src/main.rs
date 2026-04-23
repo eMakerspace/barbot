@@ -4,17 +4,19 @@
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{self, Input, InputConfig, Output};
+use esp_hal::gpio::{Input, InputConfig};
 use esp_hal::time::Rate;
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use stepper::Stepper;
 
-use crate::cmd::{CmdChannel, LiftMotorCmdSignal, PumpCmdSignal, StepperCmdSignal, StopChannel};
+use crate::cmd::{CmdChannel, PumpCmdSignal, ServoCmdSignal, StepperCmdSignal, StopChannel};
+use portable_atomic::AtomicI32;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 pub mod cmd;
+pub mod led;
 pub mod rmt;
 pub mod stepgen;
 pub mod stepper;
@@ -23,20 +25,34 @@ pub mod utils;
 
 extern crate alloc;
 
-// Note: the stepper driver operates in 1/8 th steps. Therefore, 8 microsteps = 1 motor step.
-const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(1000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(2000.0 * 8.0); // 1.0 turns / seccond (in simulation, 200 steps / turn)
+// Microstepping factor: hardware is configured for 1/4 steps.
+pub const MICROSTEPS: f64 = 4.0;
+
+// Safety margin near slot 4/5 where servo opening is allowed.
+// Forbidden zone is only the middle span between slots after this margin.
+pub const SERVO_ZONE_BUFFER: i32 = 25;
+
+pub const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
+    .with_acceleration(3000.0 * MICROSTEPS)
+    .with_max_speed(3800.0 * MICROSTEPS);
 
 const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(8000.0 * 8.0) // 1.5 turns / seccond^2 (in simulation, 200 steps / turn)
-    .with_max_speed(300.0 * 8.0); // 0.1 turns / seccond (in simulation, 200 steps / turn)
+    .with_acceleration(6000.0 * MICROSTEPS)
+    .with_max_speed(150.0 * MICROSTEPS);
 
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();
-static CMD_CHANNEL: CmdChannel = CmdChannel::new();
 static PUMP_CMD_SIG: PumpCmdSignal = PumpCmdSignal::new();
-static LIFT_MOTOR_CMD_SIG: LiftMotorCmdSignal = LiftMotorCmdSignal::new();
+static CMD_CHANNEL: CmdChannel = CmdChannel::new();
+static SERVO_CMD_SIG: ServoCmdSignal = ServoCmdSignal::new();
+// Track current stepper X position for servo forbidden zone checking
+static STEPPER_X_POS: AtomicI32 = AtomicI32::new(0);
+// Slot 4 and 5 positions sent by the Pi at boot for forbidden zone calculation.
+// i32::MIN means "not configured" — servo blocking is disabled until set.
+static SLOT4_POS: AtomicI32 = AtomicI32::new(i32::MIN);
+static SLOT5_POS: AtomicI32 = AtomicI32::new(i32::MIN);
+// Track current servo angle (0-180°). Starts at 180° (safe/closed).
+static CURRENT_SERVO_ANGLE: AtomicI32 = AtomicI32::new(180);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -71,19 +87,16 @@ async fn main(spawner: Spawner) {
         STOP_CHANNEL.publisher().unwrap(),
     ));
 
-    let emergency_stop = Input::new(
-        peripherals.GPIO9,
+    let cup_sensor = Input::new(
+        peripherals.GPIO2,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
-    spawner.must_spawn(tasks::emergency_stop_monitor(
-        emergency_stop,
-        STOP_CHANNEL.immediate_publisher(),
-    ));
+    spawner.must_spawn(tasks::cup_presence_monitor(cup_sensor));
     
     let tx_cfg = rmt::TxChannelConfig {
         idle_output: true,
         idle_output_level: esp_hal::gpio::Level::Low,
-        clk_divider: 80, // 2 microsecond tick (40 MHz / 80)
+        clk_divider: 40, // 1 microsecond tick (40 MHz / 40)
         memsize: 1,
         ..Default::default()
     };
@@ -92,7 +105,7 @@ async fn main(spawner: Spawner) {
 
     let mut stepper = Stepper::new(
         stepper_channel,
-        Rate::from_hz(40_000_000 / 80),
+        Rate::from_hz(40_000_000 / 40),
         peripherals.GPIO21,
         false,
     );
@@ -113,34 +126,33 @@ async fn main(spawner: Spawner) {
         spawner,
     ));
 
+    let pump_pin_cfg = esp_hal::gpio::OutputConfig::default()
+        .with_drive_mode(esp_hal::gpio::DriveMode::PushPull);
+    spawner.must_spawn(tasks::pump::pump_task(
+        &PUMP_CMD_SIG,
+        STOP_CHANNEL.subscriber().unwrap(),
+        [
+            esp_hal::gpio::Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            esp_hal::gpio::Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            esp_hal::gpio::Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+            esp_hal::gpio::Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
+        ],
+    ));
+
     spawner.must_spawn(tasks::route_cmd::route_cmd(tasks::route_cmd::HandleCmd {
         cmd_chan: &CMD_CHANNEL,
         stepper_sig: &STEPPER_CMD_SIG,
         pump_sig: &PUMP_CMD_SIG,
         stop_sub: STOP_CHANNEL.subscriber().unwrap(),
-        lift_motor_sig: &LIFT_MOTOR_CMD_SIG,
+        servo_sig: &SERVO_CMD_SIG,
     }));
 
-    let pump_pin_cfg = gpio::OutputConfig::default().with_drive_mode(gpio::DriveMode::PushPull);
-    spawner.must_spawn(tasks::pump::pump_task(
-        &PUMP_CMD_SIG,
+    spawner.must_spawn(tasks::servo::servo_task(
+        &SERVO_CMD_SIG,
         STOP_CHANNEL.subscriber().unwrap(),
-        [
-            Output::new(peripherals.GPIO6, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO5, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO4, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO3, tasks::pump::INACTIVE_LEVEL, pump_pin_cfg),
-        ],
+        peripherals.LEDC,
+        peripherals.GPIO9,
     ));
-    
-    spawner.must_spawn(
-        tasks::lift_motor::lift_motor(
-            &LIFT_MOTOR_CMD_SIG,
-            STOP_CHANNEL.subscriber().unwrap(),
-            Output::new(peripherals.GPIO10, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
-            Output::new(peripherals.GPIO8, tasks::lift_motor::INACTIVE_LEVEL, pump_pin_cfg),
-        )
-    );
 
     info!("Barbot HAT v{} running\r", env!("CARGO_PKG_VERSION"));
 }

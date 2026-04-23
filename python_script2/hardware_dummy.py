@@ -33,25 +33,30 @@ class DummyLED(AbstractLED):
     _MODES = {
         "idle":        ("#E8E8E8", "grey pulse – Idle"),
         "cup_missing": ("#FFB347", "orange blink – Cup Missing"),
-        "pouring":     ("#ADD8E6", "blue chase – Pouring"),
-        "finished":    ("#98FB98", "green fade – Finished"),
+        "moving":      ("#FFD580", "amber comet – Moving"),
+        "pouring":     ("#FF8C69", "red/amber fill – Pouring"),
+        "mixing":      ("#ADD8E6", "blue wave – Mixing"),
+        "finished":    ("#98FB98", "green blink – Finished"),
         "warning":     ("#FFFF99", "yellow flash – Warning"),
         "emergency":   ("#FF6961", "red strobe – Emergency"),
     }
 
     def __init__(self):
-        self._mode = "idle"
+        self._mode:      str       = "idle"
+        self._order_num: int | None = None
         log.info("[LED] Initialised – mode: idle")
 
-    def set(self, mode: str) -> None:
-        if mode == self._mode:
+    def set(self, mode: str, order_num: int | None = None) -> None:
+        if mode == self._mode and order_num == self._order_num:
             return
         if mode not in self._MODES:
             log.warning("[LED] Unknown mode '%s' – ignored", mode)
             return
         colour, desc = self._MODES[mode]
-        log.info("[LED] ◈ %s  colour=%s  (%s)", mode.upper(), colour, desc)
-        self._mode = mode
+        num_info = f"  order_num={order_num}" if order_num is not None else ""
+        log.info("[LED] ◈ %s  colour=%s  (%s)%s", mode.upper(), colour, desc, num_info)
+        self._mode      = mode
+        self._order_num = order_num
 
     @property
     def mode(self) -> str:
