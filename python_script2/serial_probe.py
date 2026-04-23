@@ -1,13 +1,15 @@
 """
 Serial port auto-detection via M115 firmware identity query.
 
-Each firmware responds to "M115\n" with a line containing:
-    FIRMWARE_NAME:<name> ...
+Scans all /dev/serial/by-id/ ports, sends M115 at 115200 baud, and matches
+responses containing FIRMWARE_NAME:<name> against the three expected devices:
 
-The probe opens every port under /dev/serial/by-id/, sends M115, waits up to
-PROBE_TIMEOUT_S seconds for a matching response line, then closes the port.
-Detected port paths are written back into hardware_config.json so subsequent
-runs skip re-detection (unless the device is reconnected on a different path).
+  barbot-hat      → hardware_config.json "serial"
+  barbot-scale    → hardware_config.json "pump_serial"
+  barbot-display  → hardware_config.json "neopixel_serial"
+
+Resolved port paths are written back into hardware_config.json.
+Raises RuntimeError if any required device is not found.
 """
 
 import glob
@@ -18,120 +20,109 @@ import serial
 
 from config import HARDWARE_CONFIG_PATH, load_json, save_json
 
-log = logging.getLogger("serial_probe")
+log = logging.getLogger("probe")
 
-PROBE_BAUD        = 115200
-PROBE_TIMEOUT_S   = 3.0   # per-port wait for M115 response
-INTER_CHAR_S      = 0.05  # pause between write and first read
+PROBE_BAUD      = 115200
+PROBE_TIMEOUT_S = 3.0
+INTER_CHAR_S    = 0.05
+
+REQUIRED_DEVICES = {"barbot-hat", "barbot-scale", "barbot-display"}
+
+_FIRMWARE_TO_KEY = {
+    "barbot-hat":     "serial",
+    "barbot-scale":   "pump_serial",
+    "barbot-display": "neopixel_serial",
+}
 
 
-def _probe_port(port: str, baud: int = PROBE_BAUD) -> str | None:
-    """
-    Open *port*, send M115, return the FIRMWARE_NAME value or None on failure.
-    The port is always closed before returning.
-    """
+def _probe_port(port: str) -> str | None:
+    """Send M115; return FIRMWARE_NAME value or None."""
+    ser = None
     try:
-        with serial.Serial(port, baud, timeout=INTER_CHAR_S) as ser:
-            ser.reset_input_buffer()
-            ser.write(b"M115\n")
-            ser.flush()
+        ser = serial.Serial()
+        ser.port = port
+        ser.baudrate = PROBE_BAUD
+        ser.timeout = INTER_CHAR_S
+        ser.dtr = False
+        ser.rts = False
+        ser.open()
 
-            deadline = time.monotonic() + PROBE_TIMEOUT_S
-            buf = b""
-            while time.monotonic() < deadline:
-                chunk = ser.read(256)
-                if chunk:
-                    buf += chunk
-                    # Scan complete lines for FIRMWARE_NAME
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        text = line.decode("ascii", errors="replace").strip()
-                        name = _parse_firmware_name(text)
-                        if name:
-                            return name
-                else:
-                    time.sleep(0.05)
-    except serial.SerialException as exc:
+        ser.reset_input_buffer()
+        ser.write(b"M115\n")
+        ser.flush()
+
+        deadline = time.monotonic() + PROBE_TIMEOUT_S
+        buf = b""
+        while time.monotonic() < deadline:
+            chunk = ser.read(256)
+            if chunk:
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    text = line.decode("ascii", errors="replace").strip()
+                    for token in text.split():
+                        if token.startswith("FIRMWARE_NAME:"):
+                            return token[len("FIRMWARE_NAME:"):]
+            else:
+                time.sleep(0.05)
+    except (serial.SerialException, TimeoutError, OSError) as exc:
         log.debug("[probe] %s: %s", port, exc)
-    return None
-
-
-def _parse_firmware_name(line: str) -> str | None:
-    """Extract the FIRMWARE_NAME value from an M115 response line."""
-    for token in line.split():
-        if token.startswith("FIRMWARE_NAME:"):
-            return token[len("FIRMWARE_NAME:"):]
+    finally:
+        if ser and ser.is_open:
+            try:
+                ser.close()
+            except Exception:
+                pass
     return None
 
 
 def probe_and_update() -> dict[str, str]:
     """
     Scan all /dev/serial/by-id/ ports, identify each firmware via M115,
-    and write the resolved port paths back into hardware_config.json.
+    write resolved ports into hardware_config.json, and return the found map.
 
-    Returns a dict mapping firmware_name → resolved port path for all
-    found devices.
+    Raises RuntimeError if any required device is missing.
     """
-    cfg = load_json(HARDWARE_CONFIG_PATH)
-
-    # Build a lookup: firmware_name → config key (e.g. "barbot-hat" → "serial")
-    wanted: dict[str, str] = {}   # firmware_name → config_key
-    for key in ("serial", "pump_serial", "neopixel_serial"):
-        name = cfg.get(key, {}).get("firmware_name")
-        if name:
-            wanted[name] = key
-
-    if not wanted:
-        log.warning("[probe] No firmware_name entries found in hardware_config.json")
-        return {}
-
     ports = sorted(glob.glob("/dev/serial/by-id/*"))
     if not ports:
-        log.warning("[probe] No serial devices found under /dev/serial/by-id/")
-        return {}
+        raise RuntimeError("No serial devices found under /dev/serial/by-id/")
 
-    log.info("[probe] Scanning %d port(s) for: %s", len(ports), list(wanted.keys()))
+    log.info("[probe] Scanning %d port(s) for: %s", len(ports), sorted(REQUIRED_DEVICES))
 
-    found: dict[str, str] = {}   # firmware_name → port path
+    wanted = set(REQUIRED_DEVICES)
+    found: dict[str, str] = {}
+
     for port in ports:
         if not wanted:
-            break   # all targets matched
+            break
         log.debug("[probe] Probing %s …", port)
-        name = _probe_port(port, PROBE_BAUD)
+        name = _probe_port(port)
         if name and name in wanted:
             log.info("[probe] ✓ %s → %s", name, port)
             found[name] = port
-            wanted.pop(name)
+            wanted.discard(name)
         elif name:
-            log.debug("[probe] %s returned unknown firmware '%s' – ignored", port, name)
+            log.debug("[probe] %s: unknown firmware '%s' – ignored", port, name)
+        else:
+            log.debug("[probe] %s: no M115 response", port)
 
     if wanted:
-        log.warning("[probe] Could not find: %s", list(wanted.keys()))
+        raise RuntimeError(f"Required devices not found: {sorted(wanted)}")
 
-    if found:
-        _write_ports(cfg, found)
-
+    cfg = load_json(HARDWARE_CONFIG_PATH)
+    _write_ports(cfg, found)
     return found
 
 
 def _write_ports(cfg: dict, found: dict[str, str]) -> None:
-    """Update the port fields in cfg and save hardware_config.json."""
-    # Invert: firmware_name → config_key
-    name_to_key: dict[str, str] = {}
-    for key in ("serial", "pump_serial", "neopixel_serial"):
-        name = cfg.get(key, {}).get("firmware_name")
-        if name:
-            name_to_key[name] = key
-
     changed = False
     for name, port in found.items():
-        key = name_to_key.get(name)
-        if key and cfg[key].get("port") != port:
-            log.info("[probe] Updating %s.port: %s → %s",
-                     key, cfg[key].get("port"), port)
-            cfg[key]["port"] = port
+        key = _FIRMWARE_TO_KEY[name]
+        section = cfg.setdefault(key, {})
+        if section.get("port") != port:
+            log.info("[probe] Updating %s.port: %s → %s", key, section.get("port"), port)
+            section["port"] = port
             changed = True
-
     if changed:
         save_json(cfg, HARDWARE_CONFIG_PATH)
         log.info("[probe] hardware_config.json updated")

@@ -7,8 +7,8 @@ Dependency graph:
     ├── BarbotRepository  ← WooClient + StoreConfig + AttributesConfig + BarbotConfig
     ├── InventoryManager  ← BarbotRepository
     ├── DrinkResolver     ← BarbotRepository
-    ├── DummyLED          (implements AbstractLED)
-    ├── DummyMachine      (implements AbstractMachine; owns scale internally)
+    ├── RealLED           (implements AbstractLED)
+    ├── RealMachine       (implements AbstractMachine; owns scale internally)
     ├── LCDMenu           (pure view – no domain knowledge)
     └── BarbotFSM         ← all of the above
 """
@@ -22,7 +22,7 @@ from woo_client import WooClient
 from repository import BarbotRepository
 from inventory import InventoryManager
 from mixer import DrinkResolver
-from hardware_dummy import DummyLED, DummyMachine
+from real_hardware import RealLED, RealMachine
 from lcd_menu import LCDMenu
 from barbot_fsm import BarbotFSM
 
@@ -36,13 +36,12 @@ logging.basicConfig(
 def main():
     init_missing_configs()
 
-    # Identify which serial port belongs to which firmware before loading config.
-    # Detected ports are written back into hardware_config.json automatically.
-    probe_and_update()
+    # Probe serial ports – detected ports are written back into hardware_config.json.
+    found = probe_and_update()
 
     env        = load_env()
     config     = BarbotConfig.load()
-    hw_config  = HardwareConfig.load()
+    hw_config  = HardwareConfig.load()   # load after probe so ports are up-to-date
     store      = StoreConfig.load()
     attributes = AttributesConfig.load()
 
@@ -52,14 +51,8 @@ def main():
     inventory = InventoryManager(repo)
     resolver  = DrinkResolver(repo)
 
-    led     = DummyLED()
-    machine = DummyMachine(
-        x_max=hw_config.x_max,
-        x_idle=hw_config.x_idle,
-        pour_duration_ms=hw_config.pour_duration_ms,
-        settle_duration_ms=hw_config.settle_duration_ms,
-        slot_positions=hw_config.slot_positions,
-    )
+    led     = RealLED(hw_config.display_port, hw_config.display_baud)
+    machine = RealMachine(hw_config)
 
     ui = LCDMenu()
 

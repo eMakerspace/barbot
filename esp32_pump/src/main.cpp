@@ -392,6 +392,9 @@ void handleCommand(const String& line) {
         float grams   = line.substring(wIdx + 1).toFloat();
         fillLoop(scale, pumpIdx, grams);
 
+    } else if (line == "M115") {
+        Serial.println("FIRMWARE_NAME:barbot-scale FIRMWARE_VERSION:1.0");
+
     } else {
         Serial.printf("ERROR unknown command: %s\n", line.c_str());
     }

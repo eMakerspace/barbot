@@ -30,17 +30,17 @@
     },
     "forbidden_servo_zones": [],
     "serial": {
-        "port": "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_E4:B3:23:C2:33:E4-if00",
+        "port": "",
         "baud": 115200,
         "firmware_name": "barbot-hat"
     },
     "pump_serial": {
-        "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+        "port": "",
         "baud": 115200,
         "firmware_name": "barbot-scale"
     },
     "neopixel_serial": {
-        "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+        "port": "",
         "baud": 115200,
         "firmware_name": "barbot-display"
     },

@@ -199,9 +199,22 @@ class HardwareConfig:
         self.slot_positions: dict[str, int] = data.get("slot_positions", {})
 
         optic = data.get("spirit_optic", {})
-        self.pour_duration_ms: int = optic.get("pour_duration_ms", 1500)
-        self.settle_duration_ms: int = optic.get("settle_duration_ms", 500)
+        self.pour_duration_ms: int    = optic.get("pour_duration_ms",  1500)
+        self.settle_duration_ms: int  = optic.get("settle_duration_ms", 500)
+        self.pour_angle: int          = optic.get("pour_angle",   85)
+        self.close_angle: int         = optic.get("close_angle", 180)
 
+        self.forbidden_servo_zones: list = data.get("forbidden_servo_zones", [])
+
+        def _serial(key: str) -> dict:
+            return data.get(key, {})
+
+        self.hat_port:    str = _serial("serial").get("port", "")
+        self.hat_baud:    int = _serial("serial").get("baud", 115200)
+        self.scale_port:  str = _serial("pump_serial").get("port", "")
+        self.scale_baud:  int = _serial("pump_serial").get("baud", 115200)
+        self.display_port: str = _serial("neopixel_serial").get("port", "")
+        self.display_baud: int = _serial("neopixel_serial").get("baud", 115200)
 
     @classmethod
     def load(cls, path: Path = HARDWARE_CONFIG_PATH) -> "HardwareConfig":
