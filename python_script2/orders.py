@@ -101,11 +101,6 @@ class OrderProcessor:
             log_error("ORDER", f"Order #{order_id}: Error making drink: {e}")
             if self.ui:
                 self.ui.clear_mixing()
-            # Ensure failed orders are not re-polled endlessly from "processing".
-            if self.woo.update_order_status(order_id, "on-hold"):
-                log_warn("ORDER", f"Order #{order_id}: moved to on-hold after failure")
-            else:
-                log_error("ORDER", f"Order #{order_id}: failed to move to on-hold")
             raise
         finally:
             self._stop_heartbeat(hb_thread)
@@ -115,6 +110,10 @@ class OrderProcessor:
         self.progress.clear()
         self.woo.update_order_status(order_id, "completed")
         log_info("ORDER", f"Order #{order_id}: Completed and status set to completed")
+
+    def skip_current_drink(self):
+        """Advance progress past the currently-failed drink without making it."""
+        self.progress.drink_done()
 
     def poll_loop(self, interval: int):
         """Blocking loop: heartbeat + fetch processing orders."""

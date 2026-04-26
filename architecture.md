@@ -57,7 +57,6 @@ This is a Raspberry Pi-based automated bartender that integrates three microcont
    → Open HAT serial port (115200 baud)
    → Open Pump serial port (115200 baud)
    → Open Neopixel serial port (115200 baud)
-   → If any fails: serial_error = True, enter simulation mode
    → Start IPC server on /tmp/barbot.sock
 
 6. Create InventoryManager
@@ -479,7 +478,7 @@ Purpose: Notify WooCommerce that barbot is still working on the order (prevents 
 #### Serial Port Unavailable
 - **File**: hardware.py:__init__
 - **Detection**: Exception on `serial.Serial(port, 115200)`
-- **Response**: Set `serial_error = True`, enter simulation mode (timed sleeps)
+- **Response**: Runtime error
 - **Impact**: UI shows warning banner (lines 592–635), no real hardware interaction
 
 #### Cup Sensor Timeout

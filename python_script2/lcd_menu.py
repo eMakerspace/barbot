@@ -571,15 +571,15 @@ class LCDMenu:
             elif m == 'error':
                 if self._polling_paused:
                     # Press confirms the current RETRY/CANCEL choice and resumes polling
-                    retry = self._retry_drink
                     self._polling_paused = False
                     self._error_acked = True
                     self._mode = 'run'
                     self._dirty = True
-                    if retry:
-                        log_info("LCDUI", "User confirmed RETRY — retrying mixers")
+                    if self._retry_drink:
+                        log_info("LCDUI", "User confirmed RETRY — retrying full drink")
                     else:
-                        log_info("LCDUI", "User confirmed CANCEL — resuming polling")
+                        log_info("LCDUI", "User confirmed CANCEL — skipping drink")
+                        self.orders.skip_current_drink()
                 else:
                     self._mode = 'menu'
                     self._dirty = True
@@ -901,7 +901,6 @@ class LCDMenu:
             severity = getattr(self, '_error_severity', 0)
             error_time = getattr(self, '_error_time', time.time())
             polling_paused = self._polling_paused
-            retry_drink = self._retry_drink
 
         elapsed = time.time() - error_time
         severity_names = ['INFO', 'WARN', 'ERROR', 'CRITICAL']
@@ -915,8 +914,8 @@ class LCDMenu:
 
         if polling_paused:
             # Rows 1-3: error name + side-by-side RETRY/CANCEL selector
-            r = ARROW if retry_drink else ' '
-            c = ARROW if not retry_drink else ' '
+            r = ARROW if self._retry_drink else ' '
+            c = ARROW if not self._retry_drink else ' '
             self._write_row(1, f'{error_name:<20}')
             self._write_row(2, f' {r}RETRY     {c}CANCEL')
             self._write_row(3, '   [Press confirm]  ')
@@ -1711,46 +1710,27 @@ class LCDMenu:
                 except Exception:
                     pass
                 
-                # Check if polling is paused and what action user selected
+                # Check if polling is paused
                 with self._lock:
                     paused = self._polling_paused
-                    retry = self._retry_drink
 
                 if paused:
                     # Wait while paused, but keep checking for stop signal
                     stop.wait(1.0)
                     continue
 
-                if retry:
-                    # User selected RETRY — retry only the mixer part (spirits already done)
-                    log_info("POLL", "Retrying mixer dispensing per user selection...")
-                    with self._lock:
-                        self._retry_drink = False
-                    # Fetch the last order and retry just the mixers
-                    pending = self.woo.fetch_all('orders', {'status': 'processing'})
-                    for order in sorted(pending, key=lambda o: o['id']):
-                        if order['id'] == self._run_last_id:
-                            try:
-                                self.orders.process_order(order)
-                                with self._lock:
-                                    self._run_count += 1
-                                log_info("POLL", f"Mixer retry succeeded for order {order['id']}")
-                            except Exception as e:
-                                log_error("POLL", f"Mixer retry failed: {e}")
-                                self.pause_polling(str(e)[:20] or "Retry failed")
-                            break
-                    continue
-                
                 try:
                     pending = self.woo.fetch_all('orders', {'status': 'processing'})
                     for order in sorted(pending, key=lambda o: o['id']):
                         if stop.is_set():
                             break
+
+                        with self._lock:
+                            self._run_last_id = order.get('id')
                         try:
                             self.orders.process_order(order)
                             with self._lock:
                                 self._run_count  += 1
-                                self._run_last_id = order.get('id')
                         except Exception as e:
                             log_error("POLL", f"Error processing order {order.get('id')}: {e}")
                             self.pause_polling(str(e)[:20] or f"Order {order.get('id')} Failed")
