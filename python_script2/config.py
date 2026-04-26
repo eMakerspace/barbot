@@ -123,18 +123,6 @@ class BarbotConfig:
     def slot_ingredient(self, slot: str) -> str | None:
         return self.slot_mapping.get(slot)
 
-    @staticmethod
-    def is_spirit_slot(slot: str) -> bool:
-        return slot in SPIRIT_SLOTS
-
-    @staticmethod
-    def is_mixer_slot(slot: str) -> bool:
-        return slot in MIXER_SLOTS
-
-    @staticmethod
-    def is_valid_slot(slot: str) -> bool:
-        return slot in ALL_SLOTS
-
 
 class AttributesConfig:
     """Cached WooCommerce attributes with bottle properties."""

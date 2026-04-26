@@ -61,12 +61,7 @@ class LcdDisplay:
         formatted = f'{text:<{COLS}}'[:COLS]
         if formatted != self._cache[row]:
             self._cache[row] = formatted
-            self._lcd.cursor_pos = (row, 0)
             self._lcd.write_string(formatted)
-
-    def invalidate(self) -> None:
-        """Force all rows to be rewritten on the next write_row() call."""
-        self._cache = [''] * ROWS
 
     # ── Backlight ────────────────────────────────────────────────
 

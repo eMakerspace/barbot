@@ -40,9 +40,6 @@ class StoreConfig:
     def products(self) -> list[dict]:
         return self._data.get("products", [])
 
-    def all_ingredients(self) -> set[str]:
-        return set(self.available_spirits) | set(self.available_mixers)
-
     # -- Attribute slug helpers ----------------------------------------------
 
     @staticmethod
@@ -58,54 +55,6 @@ class StoreConfig:
         return float(numeric) * 10 if numeric else 0
 
     # -- Derived data --------------------------------------------------------
-
-    def get_preset_recipes(self, attribute_slugs: dict[str, str]) -> dict:
-        """Build {KEY: {ingredients, product_id}} from simple products."""
-        spirits_slug = self.attr_slug("Spirits", attribute_slugs)
-        mixers_slug = self.attr_slug("Mixers", attribute_slugs)
-        spirits_amt_slug = self.attr_slug("Spirits Amount", attribute_slugs)
-        mixers_amt_slug = self.attr_slug("Mixers Amount", attribute_slugs)
-
-        recipes = {}
-        for prod in self.products:
-            if prod.get("type") != "simple":
-                continue
-            attrs = {a["name"]: a["value"] for a in prod.get("attributes", [])}
-            ingredients = []
-
-            spirit_vals = attrs.get(spirits_slug, [])
-            spirit_amt = attrs.get(spirits_amt_slug, [])
-            mixer_vals = attrs.get(mixers_slug, [])
-            mixer_amt = attrs.get(mixers_amt_slug, [])
-
-            if spirit_vals and spirit_amt:
-                ml = self.parse_cl_to_ml(spirit_amt)
-                for s in (spirit_vals if isinstance(spirit_vals, list) else [spirit_vals]):
-                    ingredients.append({"name": s, "ml": ml})
-            if mixer_vals and mixer_amt:
-                ml = self.parse_cl_to_ml(mixer_amt)
-                for m in (mixer_vals if isinstance(mixer_vals, list) else [mixer_vals]):
-                    ingredients.append({"name": m, "ml": ml})
-
-            if ingredients:
-                key = (prod.get("sku") or prod.get("slug") or prod["name"]).upper()
-                recipes[key] = {"ingredients": ingredients, "product_id": prod["id"]}
-        return recipes
-
-    def get_diy_volumes(self, attribute_slugs: dict[str, str]) -> dict:
-        """Extract default Spirit/Mixer volumes (ml) from the first variable product."""
-        spirits_amt_slug = self.attr_slug("Spirits Amount", attribute_slugs)
-        mixers_amt_slug = self.attr_slug("Mixers Amount", attribute_slugs)
-
-        for prod in self.products:
-            if prod.get("type") != "variable":
-                continue
-            attrs = {a["name"]: a["value"] for a in prod.get("attributes", [])}
-            spirit_ml = self.parse_cl_to_ml(attrs.get(spirits_amt_slug, ["4"]))
-            mixer_ml = self.parse_cl_to_ml(attrs.get(mixers_amt_slug, ["16"]))
-            if spirit_ml or mixer_ml:
-                return {"Spirit": spirit_ml, "Mixer": mixer_ml}
-        return {"Spirit": 40, "Mixer": 160}
 
     def product_by_id(self, product_id: int) -> dict | None:
         for p in self.products:

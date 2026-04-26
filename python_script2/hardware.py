@@ -33,7 +33,6 @@ import json
 import os
 import queue
 import re
-import socket as _socket
 import threading
 import time
 from pathlib import Path
@@ -56,15 +55,10 @@ _CUP_RE = re.compile(r"\[cup\]\s+(PRESENT|ABSENT)")
 # Regex that extracts fill completion reason from ESP32: [FILL_END] reason=...
 _FILL_END_REASON_RE = re.compile(r"\[FILL_END\]\s+reason=([a-z_]+)")
 
-# Unix socket path for IPC between main.py (serial owner) and barbot_web.py
-SOCKET_PATH = "/tmp/barbot.sock"
 
 # Regex to strip ANSI escape codes from ESP32 log lines
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mK]')
 
-# Module-level bounds used by lcd_menu before a HardwareInterface is instantiated.
-X_MOVE_MIN = 0
-X_MOVE_MAX = 6000
 
 try:
     import RPi.GPIO as GPIO
@@ -109,17 +103,6 @@ class NeopixelSerial:
         except Exception as e:
             log_warn("NEO", f"Send failed: {e}")
 
-    def close(self):
-        """Close the serial connection and pulse DTR to reset."""
-        try:
-            self._ser.dtr = False
-            time.sleep(0.1)
-            self._ser.dtr = True
-            time.sleep(0.1)
-            self._ser.close()
-        except Exception:
-            pass
-
 
 class HardwareError(Exception):
     pass
@@ -146,9 +129,6 @@ class EspSerial:
 
         self._send_lock = threading.Lock()
         self._lines: queue.Queue[str] = queue.Queue()
-        self._ipc_clients: list = []   # list of (socket, send_lock) tuples
-        self._ipc_lock = threading.Lock()
-        self._ipc_server_sock: "_socket.socket | None" = None
         # Optional callback called with the counts-per-gram factor whenever
         # the ESP32 confirms a successful G3.2 calibration.
         self._on_calibrated: "callable | None" = None
@@ -160,78 +140,6 @@ class EspSerial:
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
         log_info("HWSER", f"Serial reader thread started")
-
-    def _broadcast(self, line: str):
-        """Send *line* to all connected IPC clients, pruning dead ones."""
-        data = (line + "\n").encode()
-        with self._ipc_lock:
-            dead = []
-            for conn, send_lock in self._ipc_clients:
-                try:
-                    with send_lock:
-                        conn.sendall(data)
-                except OSError:
-                    dead.append((conn, send_lock))
-            for item in dead:
-                self._ipc_clients.remove(item)
-
-    def _ipc_client_handler(self, conn: "_socket.socket"):
-        """Receive G-code commands from one IPC client and forward to ESP32."""
-        send_lock = threading.Lock()
-        entry = (conn, send_lock)
-        with self._ipc_lock:
-            self._ipc_clients.append(entry)
-        try:
-            buf = b""
-            while self._running:
-                try:
-                    chunk = conn.recv(256)
-                except OSError:
-                    break
-                if not chunk:
-                    break
-                buf += chunk
-                while b"\n" in buf:
-                    raw, buf = buf.split(b"\n", 1)
-                    cmd = raw.decode("utf-8", errors="replace").strip()
-                    if cmd:
-                        self.send(cmd)
-        finally:
-            with self._ipc_lock:
-                try:
-                    self._ipc_clients.remove(entry)
-                except ValueError:
-                    pass
-            try:
-                conn.close()
-            except OSError:
-                pass
-
-    def start_ipc_server(self, path: str = SOCKET_PATH):
-        """Open a Unix socket server so barbot_web.py can send G-code and receive ESP32 output."""
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
-        srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-        srv.bind(path)
-        os.chmod(path, 0o666)
-        srv.listen(5)
-        self._ipc_server_sock = srv
-
-        def _accept():
-            while self._running:
-                try:
-                    conn, _ = srv.accept()
-                except OSError:
-                    break
-                t = threading.Thread(
-                    target=self._ipc_client_handler, args=(conn,), daemon=True
-                )
-                t.start()
-
-        threading.Thread(target=_accept, daemon=True).start()
-        print(f"[HW] IPC server listening on {path}")
 
     def _reader(self):
         buf = b""
@@ -329,24 +237,6 @@ class EspSerial:
             f"Timeout ({timeout}s) waiting for {patterns!r} from ESP32"
         )
 
-    def close(self):
-        self._running = False
-        try:
-            if self._ser:
-                # Pulse DTR low then high to trigger ESP32 reset
-                self._ser.dtr = False
-                time.sleep(0.1)
-                self._ser.dtr = True
-                time.sleep(0.1)
-            self._ser.close()
-        except Exception:
-            pass
-        if self._ipc_server_sock:
-            try:
-                self._ipc_server_sock.close()
-            except OSError:
-                pass
-
 
 # ── Hardware interface ────────────────────────────────────────────────────────
 
@@ -388,10 +278,9 @@ class HardwareInterface:
                 self._esp._on_error_state = self._on_error_state
                 self._esp._on_cup_state = self._on_cup_state_changed
                 self._restore_servo_zones()
-                self._esp.start_ipc_server()
                 # Park servo at safe closed position on startup
                 self._esp.send(f"G1 Z{hw_config.servo_close_angle}")
-                log_info("HWINT", "HAT serial and IPC server ready")
+                log_info("HWINT", "HAT serial ready")
             except Exception as e:
                 self.serial_error = str(e)
                 raise RuntimeError(f"HAT serial initialization failed: {e}")
@@ -496,29 +385,12 @@ class HardwareInterface:
                 log_info("HWINT", "GPIO cleanup complete")
             except Exception as e:
                 log_warn("HWINT", f"GPIO cleanup error: {e}")
-        if self._esp:
-            try:
-                self._esp.close()
-                log_info("HWINT", "HAT serial closed")
-            except Exception as e:
-                log_warn("HWINT", f"HAT serial close error: {e}")
-        if self._pump_esp:
-            try:
-                self._pump_esp.close()
-                log_info("HWINT", "Pump serial closed")
-            except Exception as e:
-                log_warn("HWINT", f"Pump serial close error: {e}")
-        if self._neo:
-            try:
-                self._neo.close()
-                log_info("HWINT", "Neopixel connection closed")
-            except Exception as e:
-                log_warn("HWINT", f"Neopixel close error: {e}")
+        
         log_info("HWINT", "Hardware cleanup finished")
 
     # ── Cup sensor ───────────────────────────────────────────────
 
-    def wait_for_cup(self, timeout_sec: float = 30.0):
+    def wait_for_cup(self):
         """Block until a cup is detected and confirmed via ESP32 light curtain sensor.
 
         The ESP32 monitors GPIO2 (light curtain) and reports state changes via serial
@@ -530,7 +402,7 @@ class HardwareInterface:
 
         Raises HardwareError if no cup is placed within timeout_sec seconds.
         """
-        log_info("HWINT", f"Waiting for cup (timeout: {timeout_sec}s)...")
+        log_info("HWINT", f"Waiting for cup...")
 
         if not self._esp:
             raise HardwareError("Serial port unavailable — cannot detect cup")
@@ -539,26 +411,14 @@ class HardwareInterface:
             if self.ui:
                 self.ui.show_add_cup()
             if self._neo:
-                self._neo.send("-cupwait")
+                self._neo.send("-c")
 
-            deadline = time.monotonic() + timeout_sec
-            while time.monotonic() < deadline:
-                remaining = deadline - time.monotonic()
-                self._cup_state_changed.wait(timeout=min(remaining, 0.5))
+            while True:
+                self._cup_state_changed.wait()
                 self._cup_state_changed.clear()
                 if self._cup_present:
-                    log_info("HWINT", "Cup detected, clearing add_cup prompt...")
-                    if self.ui:
-                        self.ui.clear_mixing()  # Clear the add_cup mode
+                    log_info("HWINT", "Cup detected")
                     break
-            else:
-                # Timeout — no cup placed
-                log_error("HWINT", f"Cup not placed within {timeout_sec}s!")
-                if self._neo:
-                    self._neo.send("-e RED_FLASH_FAST")
-                if self.ui:
-                    self.ui.show_error("Cup Missing", 3)
-                raise HardwareError(f"Cup not detected after {timeout_sec}s")
 
         self._cup_confirm_countdown()
 
@@ -588,73 +448,29 @@ class HardwareInterface:
                 time.sleep(wait)
         log_info("HWINT", "Cup countdown done, starting dispense.")
 
-    # Seconds before escalating to overdue strobe
-    CUP_REMOVAL_OVERDUE_SEC = 60.0
-
-    def wait_for_cup_removal(self, timeout_sec: float = 300.0):
+    def wait_for_cup_removal(self):
         """Wait for cup to be removed after drink is done.
-
-        Phase 1 (0–60s): green ring pulse + cycling attention animations on bar/U,
-                          7-seg shows order number with slow→fast escalating blink.
-        Phase 2 (60s+):  full red strobe everything until cup is taken.
-        After timeout (default 5 min), logs a warning and continues.
         """
         log_info("HWINT", f"Drink done — waiting for cup removal...")
 
-        if self.ui:
-            self.ui.show_cup_removed()
 
         if not self._esp:
             raise HardwareError("Serial port unavailable — cannot detect cup removal")
 
-        if not self._cup_present:
-            log_info("HWINT", "Cup already absent — no wait needed")
-            if self.ui:
-                self.ui.show_add_cup()
-            if self._neo:
-                self._neo.send("-c")
-            return
 
         num = self._last_order_id % 100
 
         # Phase 1: attention animations
         if self._neo:
-            self._neo.send("-drinkready")
-            self._neo.send(f"-drinknum {num}")
-
-        overdue_triggered = False
-        deadline = time.monotonic() + timeout_sec
-        while time.monotonic() < deadline:
-            elapsed = time.monotonic() - (deadline - timeout_sec)
-
-            # Escalate to overdue strobe after CUP_REMOVAL_OVERDUE_SEC
-            if not overdue_triggered and elapsed >= self.CUP_REMOVAL_OVERDUE_SEC:
-                log_warn("HWINT", "Cup not collected — escalating to overdue strobe")
-                overdue_triggered = True
-                if self._neo:
-                    self._neo.send("-overduestrobe")
-                    self._neo.send(f"-bl {num}")  # fast blink on 7-seg
-                if self.ui:
-                    self.ui.show_error("Take your drink!", 2)
-
+            self._neo.send("-done")
+            self._neo.send(f"-bl {num}")
+        
+        while True:
             self._cup_state_changed.wait(timeout=0.5)
             self._cup_state_changed.clear()
             if not self._cup_present:
                 log_info("HWINT", "Cup removed!")
-                if self.ui:
-                    self.ui.show_add_cup()
-                if self._neo:
-                    self._neo.send("-c")
                 return
-
-        log_warn("HWINT", f"Cup not removed after {timeout_sec}s — continuing anyway")
-        if self.ui:
-            self.ui.show_add_cup()
-        if self._neo:
-            self._neo.send("-c")
-
-        # Don't raise — the drink is done, allow system to continue
-        log_warn("HWINT", "Continuing despite cup-not-removed warning")
 
     # ── Motion ───────────────────────────────────────────────────
 
@@ -763,13 +579,6 @@ class HardwareInterface:
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
             self._sync(timeout=5)
 
-    def _move_to_slot(self, slot: str):
-        """Queue a move to *slot* without waiting (caller must sync later)."""
-        pos = self.hw.position_for_slot(slot)
-        if pos is None:
-            raise HardwareError(f"No position configured for slot {slot!r}")
-        self._queue_move(pos)
-
     @staticmethod
     def _parse_fill_end_reason(line: str) -> str:
         """Extract fill completion reason from a [FILL_END] line."""
@@ -836,10 +645,8 @@ class HardwareInterface:
         # Park servo BEFORE moving carriage (critical for safety)
         if self._esp:
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            time.sleep(0.1)
-        # Moving animation
-        if self._neo:
-            self._neo.send("-mv")
+            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
+
         self.move_x(pos)  # blocks until sled is at slot
         pour_ms = int(self.hw.pour_duration_ms * viscosity)
         settle_ms = self.hw.settle_duration_ms
@@ -847,9 +654,7 @@ class HardwareInterface:
             f"[HW] Spirit slot {slot}: {pours} pour(s), "
             f"viscosity={viscosity:.2f}, {pour_ms}ms/pour"
         )
-        # Pouring animation
-        if self._neo:
-            self._neo.send("-pour")
+
         self._pour_sequence(pours, pour_ms, settle_ms)
         # SAFETY: Servo is now at close_angle, which is safe
 
@@ -878,18 +683,14 @@ class HardwareInterface:
         # Park servo BEFORE moving carriage
         if self._esp:
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            time.sleep(0.1)
-        # Moving animation
-        if self._neo:
-            self._neo.send("-mv")
+            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
+
         pos = self.hw.position_for_slot(slot)
         if pos is None:
             raise HardwareError(f"No position configured for slot {slot!r}")
         self.move_x(pos)  # blocks until sled is at slot
 
-        # Mixing animation (pump running)
-        if self._neo:
-            self._neo.send("-mix")
+
         comp = self.hw.pump_tubing_compensation_g
         target_g = ml + comp
         self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
@@ -960,19 +761,6 @@ class HardwareInterface:
                 pass
         return None
 
-    def read_weight(self) -> float:
-        """Read current weight from the scale.  Returns grams as float."""
-        if not self._pump_esp:
-            raise HardwareError("Pump serial port unavailable — cannot read weight")
-
-        self._pump_esp.send("G3")
-        line = self._pump_esp.wait_for(
-            ["Weight:", "raw:", "HX711 not", "cannot read"],
-            timeout=10,
-        )
-        g = self._parse_grams(line)
-        return g if g is not None else 0.0
-
     def read_weight_str(self) -> str:
         """Return a human-readable weight string for display on the LCD."""
         if not self._pump_esp:
@@ -1011,21 +799,15 @@ class HardwareInterface:
                 print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
                 continue
             self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
-            if self._neo:
-                self._neo.send(f"-br {num}")
 
         for m in spec.mixers:
             if m["slot"] is None:
                 print(f"[HW] WARN: no slot for mixer '{m['ingredient']}' – skipping")
                 continue
             self.dispense_mixer(m["slot"], m["ml"])
-            if self._neo:
-                self._neo.send(f"-br {num}")
 
         self.move_to_idle()
-        # Celebration animation when drink is done
-        if self._neo:
-            self._neo.send("-done")
+
         self.wait_for_cup_removal()
 
     # ── Legacy compatibility stubs ───────────────────────────────

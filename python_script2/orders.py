@@ -114,24 +114,3 @@ class OrderProcessor:
     def skip_current_drink(self):
         """Advance progress past the currently-failed drink without making it."""
         self.progress.drink_done()
-
-    def poll_loop(self, interval: int):
-        """Blocking loop: heartbeat + fetch processing orders."""
-        log_info("ORDER", f"Order poll loop started (interval={interval}s)")
-        while True:
-            self.woo.send_heartbeat()
-            try:
-                log_debug("ORDER", "Fetching processing orders...")
-                orders = self.woo.fetch_all("orders", {"status": "processing"})
-                if orders:
-                    log_info("ORDER", f"Found {len(orders)} processing order(s)")
-                    for order in orders:
-                        try:
-                            self.process_order(order)
-                        except Exception as e:
-                            log_error("ORDER", f"Failed to process order {order['id']}: {e}")
-                else:
-                    log_debug("ORDER", "No processing orders found")
-            except Exception as e:
-                log_warn("ORDER", f"Fetch failed: {e}")
-            time.sleep(interval)

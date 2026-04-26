@@ -45,55 +45,6 @@ class InventoryManager:
 
         self._apply_updates(product_updates, variation_updates, verbose=True)
 
-    def sync_ingredient(self, ingredient: str, in_stock: bool):
-        """Toggle stock for all products/variations using a specific ingredient."""
-        status = "instock" if in_stock else "outofstock"
-
-        products = self.woo.fetch_all("products")
-        recipes = self.store.get_preset_recipes(self.attributes.attribute_slugs)
-        product_updates: list[dict] = []
-        variation_updates: dict[int, list[dict]] = {}
-
-        for prod in products:
-            if prod["type"] == "simple":
-                sku = (prod.get("sku") or "").upper()
-                name = (prod.get("name") or "").upper()
-                recipe = recipes.get(sku) or recipes.get(name)
-                if recipe and any(i["name"] == ingredient for i in recipe["ingredients"]):
-                    product_updates.append({"id": prod["id"], "stock_status": status})
-
-            elif prod["type"] == "variable":
-                variations = self.woo.fetch_all(f"products/{prod['id']}/variations")
-                for var in variations:
-                    if any(a.get("option") == ingredient for a in var.get("attributes", [])):
-                        variation_updates.setdefault(prod["id"], []).append(
-                            {"id": var["id"], "stock_status": status}
-                        )
-
-        self._apply_updates(product_updates, variation_updates)
-
-    def mark_empty(self, slot: str) -> bool:
-        """Mark slot empty and sync WooCommerce. Returns False if slot invalid."""
-        if not self.config.is_valid_slot(slot):
-            return False
-        ingredient = self.config.slot_ingredient(slot)
-        if not ingredient:
-            return False
-        self.config.empty_slots.add(slot)
-        self.sync_ingredient(ingredient, in_stock=False)
-        return True
-
-    def mark_refill(self, slot: str) -> bool:
-        """Mark slot refilled and sync WooCommerce. Returns False if slot invalid."""
-        if not self.config.is_valid_slot(slot):
-            return False
-        ingredient = self.config.slot_ingredient(slot)
-        if not ingredient:
-            return False
-        self.config.empty_slots.discard(slot)
-        self.sync_ingredient(ingredient, in_stock=True)
-        return True
-
     # -- Private helpers -----------------------------------------------------
 
     def _simple_product_ingredients(

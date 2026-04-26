@@ -43,7 +43,6 @@ ARROW    = '>'      # selection indicator (works in all charmaps)
 # ── Layout constants ──────────────────────────────────────────
 # Each menu row: SEL(1) SP(1) LABEL(16) HINT(2) = 20
 LABEL_W  = 16
-HINT_W   = 2
 
 
 class LCDMenu:
@@ -91,13 +90,8 @@ class LCDMenu:
 
         # ── Mode ─────────────────────────────────────────────
         # 'menu' | 'info' | 'working' | 'confirm' | 'run' | 'visc_edit'
-        # | 'x_move' | 'num_entry' | 'teach' | 'mixing' | 'pin_lock'
+        # | 'x_move' | 'num_entry' | 'teach' | 'mixing' 
         self._mode = 'menu'
-        self._locked = True
-        self._pin_entry: list[str] = []
-        self._pin_cur = 0
-        self._pin_error_until = 0.0
-        self._last_activity = time.time()
 
         # visc_edit state
         self._vedit_bottle = ''
@@ -152,7 +146,6 @@ class LCDMenu:
         self._run_last_id          = None
         self._run_backlight_until  = 0.0   # epoch time; backlight on while now < this
         self._polling_paused       = False # pause polling when error occurs
-        self._error_acked          = False # user acknowledged error
         self._retry_drink          = False # retry failed drink when user presses button
 
         # mixing state (shown during active drink dispensing)
@@ -379,14 +372,10 @@ class LCDMenu:
 
     def _on_rotate(self, d: int):
         with self._lock:
-            self._last_activity = time.time()
             m = self._mode
 
-            if m == 'pin_lock':
-                self._pin_cur = (self._pin_cur + d) % 10
-                self._dirty = True
-
-            elif m == 'run':
+    
+            if m == 'run':
                 # Any rotation wakes the backlight for 5 seconds
                 self._run_backlight_until = time.time() + 5.0
                 self._lcd.backlight = True
@@ -468,30 +457,10 @@ class LCDMenu:
         action = None
 
         with self._lock:
-            self._last_activity = time.time()
             m = self._mode
 
-            if m == 'pin_lock':
-                self._pin_entry.append(str(self._pin_cur))
-                if len(self._pin_entry) >= len(PIN_CODE):
-                    entered = ''.join(self._pin_entry[:len(PIN_CODE)])
-                    if entered == PIN_CODE:
-                        self._locked = False
-                        self._pin_entry = []
-                        self._pin_cur = 0
-                        self._pin_error_until = 0.0
-                        self._mode = 'menu'
-                        self._dirty = True
-                    else:
-                        self._pin_entry = []
-                        self._pin_cur = 0
-                        self._pin_error_until = time.time() + 1.5
-                        self._dirty = True
-                else:
-                    self._pin_cur = 0
-                    self._dirty = True
-
-            elif m == 'working':
+            
+            if m == 'working':
                 if self._work_done:
                     self._mode  = 'menu'
                     self._dirty = True
@@ -564,7 +533,6 @@ class LCDMenu:
                 if self._polling_paused:
                     # Press confirms the current RETRY/CANCEL choice and resumes polling
                     self._polling_paused = False
-                    self._error_acked = True
                     self._mode = 'run'
                     self._dirty = True
                     if self._retry_drink:
@@ -650,14 +618,13 @@ class LCDMenu:
         with self._lock:
             mode  = self._mode
             dirty = self._dirty
-            # 'working', 'run', 'mixing', 'menu', and 'pin_lock' always redraw
+            # 'working', 'run', 'mixing', 'menu', and always redraw
             # (menu needs it for marquee; row cache prevents redundant I2C writes)
-            if mode not in ('working', 'run', 'mixing', 'menu', 'pin_lock', 'cup_removed', 'add_cup', 'error') and not dirty:
+            if mode not in ('working', 'run', 'mixing', 'menu', 'cup_removed', 'add_cup', 'error') and not dirty:
                 return
             self._dirty = False
 
         if   mode == 'menu':      self._draw_menu()
-        elif mode == 'pin_lock':  self._draw_pin_lock()
         elif mode == 'info':      self._draw_info()
         elif mode == 'working':   self._draw_working()
         elif mode == 'confirm':   self._draw_confirm()
@@ -796,30 +763,6 @@ class LCDMenu:
         self._write_row(2, f'  {field:<10}{val:>6}  ')
         self._write_row(3, '  [Press to confirm] ')
 
-    def _draw_pin_lock(self):
-        with self._lock:
-            entered = len(self._pin_entry)
-            cur = self._pin_cur
-            err_until = self._pin_error_until
-
-        cells = []
-        for idx in range(len(PIN_CODE)):
-            if idx < entered:
-                cells.append('*')
-            elif idx == entered:
-                cells.append(str(cur))
-            else:
-                cells.append('_')
-        pin_line = f' PIN: {" ".join(cells)}'
-
-        self._write_row(0, self._hdr('Locked'))
-        self._write_row(1, f'{pin_line:<20}'[:20])
-        self._write_row(2, ' Rotate: set digit  ')
-        if time.time() < err_until:
-            self._write_row(3, '   Incorrect PIN    ')
-        else:
-            self._write_row(3, ' Press: next digit  ')
-
     def _draw_run(self):
         with self._lock:
             count    = self._run_count
@@ -928,14 +871,6 @@ class LCDMenu:
         # Restore run-mode backlight behaviour (off until rotated)
         self._lcd.backlight = False
 
-    def show_cup_removed(self):
-        """Show brief 'cup removed' confirmation message."""
-        with self._lock:
-            self._mode = 'cup_removed'
-            self._cup_removed_time = time.time()
-            self._dirty = True
-        self._lcd.backlight = True
-
     def show_add_cup(self):
         """Show 'place new cup' prompt."""
         with self._lock:
@@ -958,7 +893,6 @@ class LCDMenu:
             # Errors severe enough to stop dispensing need user acknowledgement
             if severity >= 2:
                 self._polling_paused = True
-                self._error_acked = False
             self._dirty = True
         self._lcd.backlight = True
 
@@ -970,7 +904,6 @@ class LCDMenu:
         """
         with self._lock:
             self._polling_paused = True
-            self._error_acked = False
             if error_name:
                 self._error_name = error_name[:20]
                 self._error_severity = 2  # Error severity
@@ -979,15 +912,6 @@ class LCDMenu:
             self._dirty = True
         self._lcd.backlight = True
         log_info("LCDUI", "Polling paused - waiting for user intervention")
-
-    def resume_polling(self):
-        """Resume polling after user acknowledges error."""
-        with self._lock:
-            self._polling_paused = False
-            self._error_acked = True
-            self._mode = 'run'
-            self._dirty = True
-        log_info("LCDUI", "Polling resumed by user")
 
     # ══════════════════════════════════════════════════════════
     # Startup tasks
@@ -1466,37 +1390,6 @@ class LCDMenu:
     def _do_clean_spirit(self, slot: str, count: int):
         self._begin_work(f'Cleaning {slot[-1]} x{count}...',
                          self.hw.clean_spirit, slot, count)
-
-    # ── Recipes ────────────────────────────────────────────────
-
-    def _enter_recipes(self):
-        sp, mx = self._slug_maps()
-
-        def disp(slug):
-            return sp.get(slug) or mx.get(slug) or slug
-
-        recipes = self.store.get_preset_recipes(self.attributes.attribute_slugs)
-        if not recipes:
-            self._show_info('Recipes', ['No recipes found.', 'Run Fetch first.', '', '[Press to return]'])
-            return
-
-        lines = []
-        for sku, recipe in recipes.items():
-            lines.append(f'{sku}:')
-            for ing in recipe['ingredients']:
-                name = disp(ing['name'])
-                ml   = ing['ml']
-                lines.append(f'  {name} {ml:.0f}ml')
-
-        diy = self.store.get_diy_volumes(self.attributes.attribute_slugs)
-        lines += [
-            '-------------------',
-            f"DIY Spirit:{diy.get('Spirit', '?'):.0f}ml",
-            f"DIY Mixer: {diy.get('Mixer',  '?'):.0f}ml",
-            '',
-            '  [Press to return] ',
-        ]
-        self._show_info('Recipes', lines)
 
     # ── Slots ──────────────────────────────────────────────────
 
