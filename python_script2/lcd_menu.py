@@ -23,7 +23,7 @@ import RPi.GPIO as GPIO
 from config import BarbotConfig, AttributesConfig, SPIRIT_SLOTS, MIXER_SLOTS, ALL_SLOTS
 from store import StoreConfig
 from woo_client import WooClient
-from hardware import HardwareInterface
+from hardware import HardwareInterface, HardwareError
 from inventory import InventoryManager
 from orders import OrderProcessor
 from lcd import LcdDisplay, COLS, ROWS
@@ -190,12 +190,20 @@ class LCDMenu:
             self._lcd.clear()
             self._encoder.start()
 
-            # If serial is unavailable (e.g. locked by barbot_web.py), show a
-            # prominent warning and wait for the user to press the encoder button
-            # before continuing in simulation mode.
+            # If serial is unavailable (e.g. locked by barbot_web.py), fail immediately.
+            # Serial errors are not recoverable — the machine cannot operate.
             if self.hw.serial_error:
-                log_warn("LCDUI", f"Serial error detected: {self.hw.serial_error}")
-                self._show_serial_error(self.hw.serial_error)
+                log_critical("LCDUI", f"Serial error detected: {self.hw.serial_error}")
+                try:
+                    self._lcd.clear()
+                    self._write_row(0, '!!! FATAL ERROR !!!')
+                    self._write_row(1, 'Serial Port Failed')
+                    self._write_row(2, self.hw.serial_error[:20])
+                    self._write_row(3, 'Cannot continue')
+                    time.sleep(2.0)
+                except Exception:
+                    pass
+                raise HardwareError(f"Cannot start: serial error – {self.hw.serial_error}")
 
             # Startup sequence: home first (blocking), then go straight to menu.
             # The WooCommerce fetch runs in the background — it can take a long
@@ -588,51 +596,6 @@ class LCDMenu:
     # ══════════════════════════════════════════════════════════
     # Mode helpers
     # ══════════════════════════════════════════════════════════
-
-    def _show_serial_error(self, error: str):
-        """Block on LCD until the user presses the encoder button.
-
-        Shows a flashing WARNING banner so the operator knows the machine is
-        running in simulation mode (no ESP32 connected / port locked).
-        """
-        # Pick a short 2nd-line hint based on the error type
-        if 'locked' in error.lower():
-            hint1 = 'Port locked!'
-            hint2 = 'Stop barbot_web.py'
-        elif 'configured' in error.lower():
-            hint1 = 'No port configured'
-            hint2 = 'Check hw config'
-        else:
-            hint1 = 'ESP32 unavailable'
-            hint2 = error[:20]
-
-        def _draw(flash: bool):
-            self._lcd.clear()
-            self._write_row(0, '!!!! WARNING !!!!!!!' if flash else '====================')
-            self._write_row(1, 'SIM MODE - NO ESP32 ')
-            self._write_row(2, f'{hint1:<20}')
-            self._write_row(3, f'{hint2:<20}')
-
-        pressed = threading.Event()
-        orig_press = self._encoder._on_press
-
-        def _dismiss():
-            pressed.set()
-
-        self._encoder._on_press = _dismiss
-
-        flash = True
-        while not pressed.wait(timeout=0.5):
-            _draw(flash)
-            flash = not flash
-
-        # Show static screen briefly so user sees it registered
-        _draw(False)
-        self._write_row(3, '[Press to continue] ')
-        time.sleep(1.0)
-
-        self._encoder._on_press = orig_press
-        self._lcd.clear()
 
     def _begin_work(self, title: str, fn, *args):
         """Switch to 'working' mode and run fn(*args) in a daemon thread."""

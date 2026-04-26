@@ -537,10 +537,7 @@ class HardwareInterface:
         log_info("HWINT", f"Waiting for cup (timeout: {timeout_sec}s)...")
 
         if not self._esp:
-            log_warn("HWINT", "No serial connection — simulating cup presence")
-            time.sleep(1)
-            log_info("HWINT", "Cup detected (simulated)")
-            return
+            raise HardwareError("Serial port unavailable — cannot detect cup")
 
         if not self._cup_present:
             if self.ui:
@@ -612,13 +609,7 @@ class HardwareInterface:
             self.ui.show_cup_removed()
 
         if not self._esp:
-            log_warn("HWINT", "No serial connection — simulating 3s cup removal delay")
-            time.sleep(3)
-            if self.ui:
-                self.ui.show_add_cup()
-            if self._neo:
-                self._neo.send("-c")
-            return
+            raise HardwareError("Serial port unavailable — cannot detect cup removal")
 
         if not self._cup_present:
             log_info("HWINT", "Cup already absent — no wait needed")
@@ -677,43 +668,41 @@ class HardwareInterface:
         **SAFETY:** Ensures servo is at safe close_angle before and after homing.
         """
         log_info("HWINT", "Homing stepper motor...")
-        if self._esp:
+        if not self._esp:
+            raise HardwareError("Serial port unavailable — cannot home stepper")
+
+        try:
+            # Park servo at safe angle BEFORE homing
+            log_info("HWINT", f"Parking servo at safe angle ({self.hw.servo_close_angle}°)...")
+            self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
+            time.sleep(0.1)
+
+            self._esp.send("G28")
+            line = self._esp.wait_for(
+                ["Homing successful", "Homing failed"],
+                timeout=120,
+            )
+            if "failed" in line.lower():
+                log_error("HWINT", f"Homing failed: {line}")
+                raise HardwareError(f"Homing failed: {line}")
+            # Parse end_pos from "Homing successful, end pos = N"
+            # Strip ANSI codes first (firmware log lines contain colour escapes).
             try:
-                # Park servo at safe angle BEFORE homing
-                log_info("HWINT", f"Parking servo at safe angle ({self.hw.servo_close_angle}°)...")
-                self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-                time.sleep(0.1)
+                clean = _ANSI_RE.sub('', line)
+                self.hw.x_max = int(clean.split("=")[-1].strip())
+                log_info("HWINT", f"Homing successful. Rail length = {self.hw.x_max} steps")
+            except ValueError:
+                log_info("HWINT", "Homing successful")
+            # After homing, stepper is at the positive end switch (x_max position)
+            self.x_position = self.hw.x_max
 
-                self._esp.send("G28")
-                line = self._esp.wait_for(
-                    ["Homing successful", "Homing failed"],
-                    timeout=120,
-                )
-                if "failed" in line.lower():
-                    log_error("HWINT", f"Homing failed: {line}")
-                    raise HardwareError(f"Homing failed: {line}")
-                # Parse end_pos from "Homing successful, end pos = N"
-                # Strip ANSI codes first (firmware log lines contain colour escapes).
-                try:
-                    clean = _ANSI_RE.sub('', line)
-                    self.hw.x_max = int(clean.split("=")[-1].strip())
-                    log_info("HWINT", f"Homing successful. Rail length = {self.hw.x_max} steps")
-                except ValueError:
-                    log_info("HWINT", "Homing successful")
-                # After homing, stepper is at the positive end switch (x_max position)
-                self.x_position = self.hw.x_max
-
-                # Move to idle position to complete homing sequence
-                log_info("HWINT", f"Moving to idle position ({self.hw.x_idle} steps)...")
-                self.move_to_idle()
-                log_info("HWINT", "Homing complete, at idle position")
-            except Exception as e:
-                log_error("HWINT", f"Homing failed with exception: {e}")
-                raise
-        else:
-            time.sleep(0.5)
-            self.x_position = 0
-            log_info("HWINT", "Homing complete (simulated)")
+            # Move to idle position to complete homing sequence
+            log_info("HWINT", f"Moving to idle position ({self.hw.x_idle} steps)...")
+            self.move_to_idle()
+            log_info("HWINT", "Homing complete, at idle position")
+        except Exception as e:
+            log_error("HWINT", f"Homing failed with exception: {e}")
+            raise
 
     def _queue_move(self, position: int):
         """Queue a G0 move without waiting for completion."""
@@ -744,19 +733,17 @@ class HardwareInterface:
 
     def move_x(self, position: int):
         """Move the X axis to *position* steps and wait for completion."""
+        if not self._esp:
+            raise HardwareError("Serial port unavailable — cannot move stepper")
+
         position = max(0, min(position, self.hw.x_max))
         distance = abs(position - self.x_position)
         print(f"[HW] Move X: {self.x_position} → {position} ({distance} steps)")
-        if self._esp:
-            self._queue_move(position)
-            try:
-                self._esp.wait_for(["Move done"], timeout=30.0)
-            except TimeoutError:
-                print("[HW] WARNING: move timed out")
-        else:
-            travel_s = distance / max(self.hw.x_max, 1)
-            time.sleep(travel_s * 0.5 + 0.05)
-            self.x_position = position
+        self._queue_move(position)
+        try:
+            self._esp.wait_for(["Move done"], timeout=30.0)
+        except TimeoutError:
+            print("[HW] WARNING: move timed out")
 
     def move_to_idle(self):
         """Move to idle position with servo at safe close_angle.
@@ -812,11 +799,7 @@ class HardwareInterface:
             settle_duration_ms: Time to wait between pours.
         """
         if not self._esp:
-            for i in range(pours):
-                time.sleep(pour_duration_ms / 1000)
-                if i < pours - 1:
-                    time.sleep(settle_duration_ms / 1000)
-            return
+            raise HardwareError("Serial port unavailable — cannot dispense spirits")
 
         pour_angle = self.hw.servo_pour_angle
         close_angle = self.hw.servo_close_angle
@@ -892,6 +875,9 @@ class HardwareInterface:
         except ValueError:
             raise HardwareError(f"Slot {slot!r} is not a mixer slot")
 
+        if not self._pump_esp:
+            raise HardwareError("Pump serial port unavailable — cannot dispense mixers")
+
         print(f"[HW] Mixer slot {slot} (pump {pump_idx}): {ml:.1f} ml")
         # Park servo BEFORE moving carriage
         if self._esp:
@@ -905,39 +891,37 @@ class HardwareInterface:
             raise HardwareError(f"No position configured for slot {slot!r}")
         self.move_x(pos)  # blocks until sled is at slot
 
-        if self._pump_esp:
-            # Mixing animation (pump running)
-            if self._neo:
-                self._neo.send("-mix")
-            comp = self.hw.pump_tubing_compensation_g
-            target_g = ml + comp
-            self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
-            line = self._pump_esp.wait_for("[FILL_END]", timeout=120)
-            reason = self._parse_fill_end_reason(line)
-            if reason not in {"target_reached", "zero_target"}:
-                raise HardwareError(f"Fill failed ({reason}): {line}")
-            try:
-                for part in line.split():
-                    if part.startswith("dispensed="):
-                        print(f"[HW]   dispensed: {part.split('=')[1]}")
-            except Exception:
-                pass
-        else:
-            time.sleep(5)
+        # Mixing animation (pump running)
+        if self._neo:
+            self._neo.send("-mix")
+        comp = self.hw.pump_tubing_compensation_g
+        target_g = ml + comp
+        self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
+        line = self._pump_esp.wait_for("[FILL_END]", timeout=120)
+        reason = self._parse_fill_end_reason(line)
+        if reason not in {"target_reached", "zero_target"}:
+            raise HardwareError(f"Fill failed ({reason}): {line}")
+        try:
+            for part in line.split():
+                if part.startswith("dispensed="):
+                    print(f"[HW]   dispensed: {part.split('=')[1]}")
+        except Exception:
+            pass
 
     # ── Scale ────────────────────────────────────────────────────
 
     def tare_scale(self) -> str:
         """Tare (zero) the scale."""
-        if self._pump_esp:
-            self._pump_esp.send("G3.1")
-            self._pump_esp.wait_for(
-                "Scale tared",
-                error_patterns=["HX711 not"],
-                timeout=10,
-            )
-            return "Scale tared."
-        return "Scale tare (simulated)."
+        if not self._pump_esp:
+            raise HardwareError("Pump serial port unavailable — cannot tare scale")
+
+        self._pump_esp.send("G3.1")
+        self._pump_esp.wait_for(
+            "Scale tared",
+            error_patterns=["HX711 not"],
+            timeout=10,
+        )
+        return "Scale tared."
 
     def calibrate_scale(self, known_grams: float) -> str:
         """Calibrate scale with a known weight already on the platform (no tare).
@@ -946,7 +930,8 @@ class HardwareInterface:
         Sends G3.2 W{grams} and waits for confirmation.
         """
         if not self._pump_esp:
-            return "Calibration (simulated)."
+            raise HardwareError("Pump serial port unavailable — cannot calibrate scale")
+
         self._pump_esp.send(f"G3.2 W{known_grams:.1f}")
         line = self._pump_esp.wait_for(
             ["Calibrated:", "Calibration failed"],
@@ -981,32 +966,34 @@ class HardwareInterface:
 
     def read_weight(self) -> float:
         """Read current weight from the scale.  Returns grams as float."""
-        if self._pump_esp:
-            self._pump_esp.send("G3")
+        if not self._pump_esp:
+            raise HardwareError("Pump serial port unavailable — cannot read weight")
+
+        self._pump_esp.send("G3")
+        line = self._pump_esp.wait_for(
+            ["Weight:", "raw:", "HX711 not", "cannot read"],
+            timeout=10,
+        )
+        g = self._parse_grams(line)
+        return g if g is not None else 0.0
+
+    def read_weight_str(self) -> str:
+        """Return a human-readable weight string for display on the LCD."""
+        if not self._pump_esp:
+            raise HardwareError("Pump serial port unavailable — cannot read weight")
+
+        self._pump_esp.send("G3")
+        try:
             line = self._pump_esp.wait_for(
                 ["Weight:", "raw:", "HX711 not", "cannot read"],
                 timeout=10,
             )
             g = self._parse_grams(line)
-            return g if g is not None else 0.0
-        return 0.0
-
-    def read_weight_str(self) -> str:
-        """Return a human-readable weight string for display on the LCD."""
-        if self._pump_esp:
-            self._pump_esp.send("G3")
-            try:
-                line = self._pump_esp.wait_for(
-                    ["Weight:", "raw:", "HX711 not", "cannot read"],
-                    timeout=10,
-                )
-                g = self._parse_grams(line)
-                if g is not None:
-                    return f"Weight: {g:.1f}g"
-                return f"Scale err: {line[:12]}"
-            except TimeoutError:
-                return "Scale timeout"
-        return "Weight: 0.0g (sim)"
+            if g is not None:
+                return f"Weight: {g:.1f}g"
+            return f"Scale err: {line[:12]}"
+        except TimeoutError:
+            return "Scale timeout"
 
     # ── Emergency stop / resume ──────────────────────────────────
 
