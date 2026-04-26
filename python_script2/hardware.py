@@ -470,6 +470,9 @@ class HardwareInterface:
             self._cup_state_changed.clear()
             if not self._cup_present:
                 log_info("HWINT", "Cup removed!")
+                self._neo.send("-i")
+                time.sleep(1)
+
                 return
 
     # ── Motion ───────────────────────────────────────────────────
@@ -487,7 +490,7 @@ class HardwareInterface:
             # Park servo at safe angle BEFORE homing
             log_info("HWINT", f"Parking servo at safe angle ({self.hw.servo_close_angle}°)...")
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            time.sleep(0.1)
+            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
 
             self._esp.send("G28")
             line = self._esp.wait_for(
@@ -572,7 +575,7 @@ class HardwareInterface:
         if self._esp:
             # Park servo at safe angle BEFORE moving carriage
             self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            time.sleep(0.1)
+            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
         self.move_x(self.hw.x_idle)
         if self._esp:
             # Ensure servo remains parked AFTER carriage move
