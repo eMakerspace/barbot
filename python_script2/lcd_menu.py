@@ -1030,14 +1030,6 @@ class LCDMenu:
     def _do_read_weight(self) -> str:
         return self.hw.read_weight_str()
 
-    def _do_emergency_stop(self) -> str:
-        self.hw.emergency_stop()
-        return 'Stopped! Press Resume.'
-
-    def _do_resume(self) -> str:
-        self.hw.resume()
-        return 'Resumed.'
-
     def _do_fetch(self) -> str:
         self._fetch_attributes()
         self.store.fetch(self.woo, self.attributes.term_slugs)
@@ -1284,8 +1276,6 @@ class LCDMenu:
             {'label': 'Move X',      'hint': '  ',        'action': self._enter_move_x},
             {'label': 'Tare Scale',  'hint': '  ',        'action': lambda: self._begin_work('Taring...', self._do_tare_scale)},
             {'label': 'Read Weight', 'hint': '  ',        'action': lambda: self._begin_work('Reading...', self._do_read_weight)},
-            {'label': 'E-Stop',      'hint': '  ',        'action': lambda: self._show_confirm('E-Stop', 'Stop all motors?', lambda: self._begin_work('Stopping...', self._do_emergency_stop))},
-            {'label': 'Resume',      'hint': '  ',        'action': lambda: self._begin_work('Resuming...', self._do_resume)},
             {'label': 'Clean',       'hint': f'{ARROW} ', 'action': self._enter_clean},
             {'label': 'Hardware',    'hint': f'{ARROW} ', 'action': self._enter_hardware},
             {'label': 'Back',        'hint': '  ',        'action': self._pop},

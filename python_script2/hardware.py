@@ -995,24 +995,6 @@ class HardwareInterface:
         except TimeoutError:
             return "Scale timeout"
 
-    # ── Emergency stop / resume ──────────────────────────────────
-
-    def emergency_stop(self):
-        """Send M0.1 (immediate stop): all motors and pumps halt instantly."""
-        print("[HW] EMERGENCY STOP")
-        if self._esp:
-            self._esp.send("M0.1")
-        if self._pump_esp:
-            self._pump_esp.send("M0.1")
-
-    def resume(self):
-        """Send M1 (continue): clear emergency stop state on ESP32."""
-        print("[HW] Resume")
-        if self._esp:
-            self._esp.send("M1")
-        if self._pump_esp:
-            self._pump_esp.send("M1")
-
     # ── High-level drink sequence ────────────────────────────────
 
     def make_drink(self, spec, retry_mixers_only: bool = False):
