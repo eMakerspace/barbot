@@ -71,14 +71,14 @@ try:
     _GPIO_AVAILABLE = True
 except ImportError:
     _GPIO_AVAILABLE = False
-    print("[HW] RPi.GPIO not available – running in simulation mode")
+    raise RuntimeError("RPi.GPIO library not available - GPIO functionality disabled")
 
 try:
     import serial as _pyserial
     _SERIAL_AVAILABLE = True
 except ImportError:
     _SERIAL_AVAILABLE = False
-    print("[HW] pyserial not available – serial disabled")
+    raise RuntimeError("pyserial library not available - serial functionality disabled")
 
 
 # ── Neopixel/7-Segment serial driver (fire-and-forget) ──────────────────────
@@ -352,9 +352,6 @@ class EspSerial:
 
 class HardwareInterface:
     """Physical machine control via GPIO + ESP32 G-code serial.
-
-    Falls back to simulation (timed sleeps, log prints) when the serial port
-    is unavailable or not configured.
     """
 
     def __init__(self, config: BarbotConfig, hw_config: HardwareConfig):
@@ -397,13 +394,13 @@ class HardwareInterface:
                 log_info("HWINT", "HAT serial and IPC server ready")
             except Exception as e:
                 self.serial_error = str(e)
-                log_error("HWINT", f"HAT serial initialization failed: {e} – running in simulation mode")
+                raise RuntimeError(f"HAT serial initialization failed: {e}")
         else:
             if not hw_config.serial_port:
                 self.serial_error = "No HAT serial port configured"
-                log_warn("HWINT", "No HAT serial port configured – running in simulation mode")
+                raise RuntimeError("No HAT serial port configured")
             else:
-                log_warn("HWINT", "pyserial not available")
+                raise RuntimeError("pyserial library not available - serial functionality disabled")
 
         if _SERIAL_AVAILABLE and hw_config.pump_port:
             try:
@@ -413,10 +410,10 @@ class HardwareInterface:
                 self._restore_calibration()
                 log_info("HWINT", "Pump serial ready")
             except Exception as e:
-                log_error("HWINT", f"Pump serial initialization failed: {e} – scale/pump in simulation mode")
+                raise RuntimeError(f"Pump serial initialization failed: {e}")
         else:
             if not hw_config.pump_port:
-                log_warn("HWINT", "No pump serial port configured – scale/pump in simulation mode")
+                raise RuntimeError("No pump serial port configured")
 
         # Initialize neopixel/7-segment ESP32 if configured
         if _SERIAL_AVAILABLE and hw_config.neo_port:
@@ -425,8 +422,7 @@ class HardwareInterface:
                 self._neo.send("-i")   # start idle animations on startup
                 log_info("HWINT", "Neopixel controller initialized")
             except Exception as e:
-                log_warn("HWINT", f"Neopixel serial initialization failed: {e} – running without neopixel display")
-
+                raise RuntimeError(f"Neopixel serial initialization failed: {e}")
     # ── Scale calibration persistence ────────────────────────────
 
     def _save_calibration_factor(self, factor: float):
@@ -997,27 +993,26 @@ class HardwareInterface:
 
     # ── High-level drink sequence ────────────────────────────────
 
-    def make_drink(self, spec, retry_mixers_only: bool = False):
+    def make_drink(self, spec):
         """Full sequence for one DrinkSpec: cup → spirits → mixers → idle → done.
 
         Args:
             spec: DrinkSpec with spirits and mixers to dispense
-            retry_mixers_only: If True, skip spirits (already done) and only retry mixers
         """
         num = self._last_order_id % 100
 
-        if not retry_mixers_only:
-            self.wait_for_cup()
+        
+        self.wait_for_cup()
+        if self._neo:
+            self._neo.send(f"-br {num}")
+
+        for s in spec.spirits:
+            if s["slot"] is None:
+                print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
+                continue
+            self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
             if self._neo:
                 self._neo.send(f"-br {num}")
-
-            for s in spec.spirits:
-                if s["slot"] is None:
-                    print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
-                    continue
-                self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
-                if self._neo:
-                    self._neo.send(f"-br {num}")
 
         for m in spec.mixers:
             if m["slot"] is None:
@@ -1035,24 +1030,11 @@ class HardwareInterface:
 
     # ── Legacy compatibility stubs ───────────────────────────────
 
-    def dispense(self, slot: str, ml: float):
-        if slot in SPIRIT_SLOTS:
-            self.dispense_spirit(slot, pours=1)
-        else:
-            self.dispense_mixer(slot, ml)
-
     def display_order_id(self, short_id: int):
         """Display order ID on neopixel 7-segment display."""
         self._last_order_id = short_id
         if self._neo:
             self._neo.send(f"-br {short_id % 100}")  # breathe number while preparing
-
-    def signal_done(self):
-        pass  # handled by LCD layer
-
-    def move_x_raw(self, position: int) -> str:
-        self.move_x(position)
-        return f"Moved to {position}"
 
     def clean_mixer(self, slot: str, grams: int) -> str:
         self.tare_scale()
@@ -1064,6 +1046,3 @@ class HardwareInterface:
         # After cleaning, move to idle (which parks servo at safe position)
         self.move_to_idle()
         return f"{slot} cleaned ×{count}"
-
-    def check_slot_sensor(self, slot: str) -> bool:
-        return slot not in self.config.empty_slots

@@ -1731,7 +1731,7 @@ class LCDMenu:
                     for order in sorted(pending, key=lambda o: o['id']):
                         if order['id'] == self._run_last_id:
                             try:
-                                self.orders.process_order(order, retry_mixers_only=True)
+                                self.orders.process_order(order)
                                 with self._lock:
                                     self._run_count += 1
                                 log_info("POLL", f"Mixer retry succeeded for order {order['id']}")

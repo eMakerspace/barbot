@@ -56,12 +56,11 @@ class OrderProcessor:
         thread.join(timeout=HEARTBEAT_INTERVAL + 5)
         log_debug("ORDER", "Heartbeat thread stopped")
 
-    def process_order(self, order: dict, retry_mixers_only: bool = False):
+    def process_order(self, order: dict):
         """Parse all line items, make each drink, then mark order completed.
 
         Args:
             order: WooCommerce order dict
-            retry_mixers_only: If True, only retry mixers of the current drink (skip spirits/cup)
         """
         order_id = order["id"]
         short_id = order_id % 100
@@ -96,7 +95,7 @@ class OrderProcessor:
                 spec.log()
                 if self.ui:
                     self.ui.show_mixing(drink_num, total, spec.name)
-                self.hw.make_drink(spec, retry_mixers_only=retry_mixers_only)
+                self.hw.make_drink(spec)
                 self.progress.drink_done()
         except Exception as e:
             log_error("ORDER", f"Order #{order_id}: Error making drink: {e}")
