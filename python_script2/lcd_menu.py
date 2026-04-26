@@ -40,11 +40,6 @@ VISIBLE  = 3    # item rows; row 0 is always the header
 SPINNER  = ('|', '/', '-', '\\')
 ARROW    = '>'      # selection indicator (works in all charmaps)
 
-# ── PIN Lock feature toggle ───────────────────────────────────
-# Set to False to disable PIN lock, True to enable it
-ENABLE_PIN_LOCK = False
-PIN_CODE = '6969'
-
 # ── Layout constants ──────────────────────────────────────────
 # Each menu row: SEL(1) SP(1) LABEL(16) HINT(2) = 20
 LABEL_W  = 16
@@ -224,10 +219,7 @@ class LCDMenu:
             # Main menu
             log_info("LCDUI", "Pushing main menu...")
             self._push(self._title_main, self._items_main)
-            with self._lock:
-                # Engage PIN lock only if enabled
-                if ENABLE_PIN_LOCK:
-                    self._engage_pin_lock_locked(reset_to_root=True)
+
 
             log_info("LCDUI", "Entering render loop...")
             try:
@@ -648,22 +640,7 @@ class LCDMenu:
             self._conf_cancel_mode = cancel_mode
             self._dirty            = True
 
-    def _engage_pin_lock_locked(self, *, reset_to_root: bool):
-        self._locked = True
-        self._mode = 'pin_lock'
-        self._pin_entry = []
-        self._pin_cur = 0
-        self._pin_error_until = 0.0
-        self._dirty = True
-        if reset_to_root and self._stack:
-            self._stack = self._stack[:1]
-            self._nav = self._nav[:1]
-            if self._nav:
-                self._nav[0] = [0, 0]
-            if hasattr(self, '_custom_state_stack') and self._custom_state_stack:
-                self._custom_state_stack = self._custom_state_stack[:1]
-            self._marq_label = ''
-        self._lcd.backlight = True
+
 
     # ══════════════════════════════════════════════════════════
     # Render dispatcher
@@ -1746,9 +1723,6 @@ class LCDMenu:
         with self._lock:
             if self._run_stop:
                 self._run_stop.set()
-            # Re-engage PIN lock only if enabled
-            if ENABLE_PIN_LOCK:
-                self._engage_pin_lock_locked(reset_to_root=True)
         self._lcd.backlight = True
 
     # ── Quit ───────────────────────────────────────────────────
