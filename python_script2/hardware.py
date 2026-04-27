@@ -159,7 +159,6 @@ class EspSerial:
                         print(f"[ESP32] {line}")
                         log_debug("HWSER", f"ESP32 → {line}")
                         self._lines.put(line)
-                        self._broadcast(line)
 
                         # Check for calibration messages
                         m = _CALIBRATION_RE.search(line)
