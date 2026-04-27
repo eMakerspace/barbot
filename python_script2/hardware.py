@@ -524,7 +524,7 @@ class HardwareInterface:
             self._esp.send("G28")
             line = self._esp.wait_for(
                 ["Homing successful", "Homing failed"],
-                timeout=240,
+                timeout=360,
             )
             if "failed" in line.lower():
                 log_error("HWINT", f"Homing failed: {line}")
