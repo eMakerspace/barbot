@@ -17,17 +17,16 @@ This is a Raspberry Pi-based automated bartender that integrates three microcont
 | Module | Responsibility |
 |---|---|
 | `config.py` | Configuration management (BarbotConfig, HardwareConfig, AttributesConfig, StoreConfig) |
-| `hardware.py` | G-code serial driver (EspSerial, HardwareInterface) with dual ESP32 interfaces and IPC server |
-| `lcd_menu.py` | Full-featured UI (4x20 LCD + rotary encoder) with state machine (13 modes) |
+| `hardware.py` | G-code serial driver (EspSerial, HardwareInterface) with dual ESP32 interfaces |
+| `lcd_menu.py` | Full-featured UI (4x20 LCD + rotary encoder) with state machine (12 modes) + polling daemon |
 | `lcd.py` | Low-level I2C LCD wrapper (address 0x3F, PCF8574 backpack) with write-caching |
 | `encoder.py` | Quadrature rotary encoder with 2 kHz polling and debounce (300 ms default) |
-| `orders.py` | WooCommerce order polling and drink recipe processing |
+| `orders.py` | WooCommerce order processing (cup detection → spirits → mixers → cup removal) |
 | `mixer.py` | Recipe resolution (line_items → DrinkSpec with spirits + mixers) |
 | `woo_client.py` | REST API wrapper with pagination and batch updates |
-| `inventory.py` | Stock synchronization (push_all, sync_ingredient) |
-| `store.py` | Product catalog caching and recipe derivation |
+| `inventory.py` | Stock synchronization (push_all only) |
+| `store.py` | Product catalog caching |
 | `progress.py` | Crash-safe order progress tracking (disk-persisted JSON) |
-| `console.py` | Legacy CLI (replaced by LCDMenu but still present) |
 | `logger.py` | Unified logging with elapsed-time timestamps |
 | `main.py` | Startup orchestration and signal handling |
 
@@ -83,16 +82,16 @@ This is a Raspberry Pi-based automated bartender that integrates three microcont
 
 ## 3. Main Event Loop and State Machine
 
-### LCDMenu States (13 Distinct Modes)
+### LCDMenu States (12 Distinct Modes)
 
 | Mode | Purpose | Transitions |
 |---|---|---|
 | `menu` | Navigate Setup/Run/Maintenance menus | Rotate to scroll, press to select |
-| `run` | Order polling loop active | Backlight timeout, error → pause |
+| `run` | Order polling loop active (daemon `_poll()` in background) | Backlight timeout, error → pause |
 | `info` | Display-only info screen | Auto or button to return |
 | `working` | Task execution (homing, fetch, teach) | Spinner until `_work_done` flag |
 | `confirm` | Yes/No dialog | Rotate to toggle, press to confirm |
-| `mixing` | Show drink number during dispensing | Auto-dismiss when `_cup_present == False` |
+| `mixing` | Show drink number during dispensing | Auto-dismiss when drink complete |
 | `cup_removed` | Brief 2 s confirmation | Auto-dismiss |
 | `add_cup` | Flashing "PUT CUP IN!" prompt | Auto-dismiss when cup detected |
 | `error` | Error display with RETRY/CANCEL | Rotate to select, press to confirm |
@@ -100,7 +99,6 @@ This is a Raspberry Pi-based automated bartender that integrates three microcont
 | `x_move` | Jog stepper to position | Rotate L/R, press to confirm |
 | `teach` | Jog stepper + save slot position | Rotate L/R, press to save |
 | `num_entry` | Generic integer input | Rotate to increment, press to confirm |
-| `pin_lock` | PIN code entry (feature-gated) | Digit input with timeout |
 
 ### Render Loop (Lines 709–732)
 
@@ -184,20 +182,18 @@ make_drink(spec):
 
 ### C. Cup Detection & Removal
 
-**wait_for_cup()** (hardware.py:521-568)
-- Blocks on `_cup_state_changed.wait(timeout=30)` event
+**wait_for_cup()** (hardware.py:402-428)
+- Blocks on `_cup_state_changed.wait()` event (no timeout — unbounded wait)
 - ESP32 reports `[cup] PRESENT` / `[cup] ABSENT` via serial
-- Timeout: 30 s → raises `HardwareError` ("Cup detection timed out")
-- On detection: triggers no UI change (already in mixing mode), returns immediately
+- On detection: returns immediately
+- If cup never detected, waits indefinitely (robust to slow customers)
 
-**wait_for_cup_removal()** (hardware.py:594-657)
-- Called after drink is complete to ensure cup is physically taken
-- Shows "cup_removed" UI mode (2-3 line message)
-- Sends `-drinkready` animation to neopixel (green + order ID)
-- Phase 1 (0–60s): Cup removal alert with escalating blink speed
-- Phase 2 (60s+): `-overduestrobe` (red) + `show_error("Take your drink!", 2)` UI alert
-- **Does NOT raise on timeout after 300s** → logs warning and continues
-- This allows system to proceed to next order even if customer didn't collect
+**wait_for_cup_removal()** (hardware.py:450-476)
+- Called after drink is complete
+- Sends `-done` animation to neopixel (celebration)
+- Sends `-bl {order_id}` to 7-segment for display
+- No timeout or escalation — simplified flow
+- Returns immediately after sending animations
 
 ### D. Error Handling Path
 
@@ -399,25 +395,18 @@ GPIO.setwarnings(False)
 | `send_heartbeat()` | POST `/wp-json/barmachine/v1/ping` | Custom endpoint, errors logged but ignored |
 | `update_term_viscosity(attr_id, term_id, viscosity)` | PUT `/products/attributes/{id}/terms/{id}` | Updates ingredient viscosity |
 
-### Order Polling Loop (lcd_menu.py:1706-1742)
+### Order Polling Loop (lcd_menu.py daemon `_poll()`)
 
-```python
-_poll() daemon thread (in run mode):
-    loop:
-        1. woo.send_heartbeat()
-        2. Check _polling_paused flag
-        3. If paused:
-            - sleep(1s) and continue (waiting for user RETRY/CANCEL)
-        4. Otherwise: Fetch all 'processing' orders
-        5. For each order (sorted by ID):
-            try:
-                process_order(order) ← Makes FULL drink every time (no retry_mixers_only)
-                _run_count += 1
-            except Exception:
-                pause_polling(error_name[:20])
-                break  ← Exit polling loop, wait for user action
-        6. stop.wait(poll_interval) → sleep until next poll
-```
+**Polling is now fully integrated into LCDMenu UI daemon:**
+- Spawned when entering 'run' mode (order polling active)
+- `_poll()` daemon runs in background, checking `_polling_paused` flag
+- If paused: sleeps 1s (waiting for user RETRY/CANCEL)
+- Otherwise: fetches 'processing' orders from WooCommerce
+- For each order:
+  - Calls `process_order(order)` → makes FULL drink (no partial retry)
+  - Increments `_run_count` on success
+  - On exception: calls `pause_polling()`, breaking loop
+  - User sees RETRY/CANCEL selector; UI event handlers resume polling
 
 **Polling Behavior**:
 - When an error occurs, `_polling_paused` is set and loop stops fetching
@@ -502,11 +491,12 @@ Purpose: Notify WooCommerce that barbot is still working on the order (prevents 
 - **Impact**: Order moved to "on-hold", LED shows RED_FLASH_FAST
 
 #### Homing Failure
-- **File**: hardware.py:687–694
+- **File**: hardware.py:480–520
 - **Detection**: G28 response doesn't contain "Homing successful"
 - **Response**: Raise `HardwareError`
 - **Caught by**: `_wait_work()` in LCD menu
 - **Impact**: UI shows error, user can retry homing
+- **Recent Change (bddbe06)**: Servo parking now uses G-code delay (`T0 D{settle_duration_ms}`) instead of Python `time.sleep()` for more precise timing
 
 #### Move Timeout
 - **File**: hardware.py:742–743
