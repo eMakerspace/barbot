@@ -37,8 +37,8 @@ pub const STEPPER_NORMAL_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::Accel
     .with_max_speed(3800.0 * MICROSTEPS);
 
 const STEPPER_HOMING_ACCEL_SPEED: stepper::AccelSpeedConfig = stepper::AccelSpeedConfig::zero()
-    .with_acceleration(8000.0 * MICROSTEPS)
-    .with_max_speed(300.0 * MICROSTEPS);
+    .with_acceleration(2000.0 * MICROSTEPS)
+    .with_max_speed(100.0 * MICROSTEPS);
 
 static STOP_CHANNEL: StopChannel = StopChannel::new();
 static STEPPER_CMD_SIG: StepperCmdSignal = StepperCmdSignal::new();

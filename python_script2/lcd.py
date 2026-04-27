@@ -61,6 +61,7 @@ class LcdDisplay:
         formatted = f'{text:<{COLS}}'[:COLS]
         if formatted != self._cache[row]:
             self._cache[row] = formatted
+            self._lcd.cursor_pos = (row, 0)
             self._lcd.write_string(formatted)
 
     # ── Backlight ────────────────────────────────────────────────
