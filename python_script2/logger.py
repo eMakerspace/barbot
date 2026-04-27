@@ -1,7 +1,6 @@
 """Unified logging system with detailed serial output tracking."""
 
 import sys
-import time
 from datetime import datetime
 
 
@@ -9,12 +8,11 @@ class SerialLogger:
     """Central logging facility that writes to stderr and ensures serial visibility."""
 
     def __init__(self):
-        self.start_time = time.time()
+        pass
 
     def _format_timestamp(self) -> str:
-        """Return elapsed seconds since logger creation."""
-        elapsed = time.time() - self.start_time
-        return f"[{elapsed:8.2f}s]"
+        """Return current time in HH:MM:SS format."""
+        return datetime.now().strftime("[%H:%M:%S]")
 
     def debug(self, module: str, msg: str):
         """Debug-level message."""
