@@ -821,6 +821,7 @@ class LCDMenu:
             severity = getattr(self, '_error_severity', 0)
             error_time = getattr(self, '_error_time', time.time())
             polling_paused = self._polling_paused
+            is_network_error = getattr(self, '_is_network_error', False)
 
         elapsed = time.time() - error_time
         severity_names = ['INFO', 'WARN', 'ERROR', 'CRITICAL']
@@ -833,12 +834,18 @@ class LCDMenu:
         self._write_row(0, header[:20])
 
         if polling_paused:
-            # Rows 1-3: error name + side-by-side RETRY/CANCEL selector
-            r = ARROW if self._retry_drink else ' '
-            c = ARROW if not self._retry_drink else ' '
-            self._write_row(1, f'{error_name:<20}')
-            self._write_row(2, f' {r}RETRY     {c}CANCEL')
-            self._write_row(3, '   [Press confirm]  ')
+            if is_network_error:
+                # Network errors show different UI (no user action needed)
+                self._write_row(1, f'{error_name:<20}')
+                self._write_row(2, 'Retrying...')
+                self._write_row(3, '')
+            else:
+                # Hardware/order errors show RETRY/CANCEL selector
+                r = ARROW if self._retry_drink else ' '
+                c = ARROW if not self._retry_drink else ' '
+                self._write_row(1, f'{error_name:<20}')
+                self._write_row(2, f' {r}RETRY     {c}CANCEL')
+                self._write_row(3, '   [Press confirm]  ')
         else:
             self._write_row(1, f'[{sev_str}]')
             self._write_row(2, f'{error_name:<20}')
@@ -898,7 +905,7 @@ class LCDMenu:
 
     def pause_polling(self, error_name: str = None):
         """Pause polling when an error occurs and wait for user intervention.
-        
+
         Args:
             error_name: Optional error name to display (uses last error if not provided)
         """
@@ -908,6 +915,10 @@ class LCDMenu:
                 self._error_name = error_name[:20]
                 self._error_severity = 2  # Error severity
                 self._error_time = time.time()
+                # Track if this is a network error (for different UI display)
+                self._is_network_error = "failed" in error_name.lower() or "fetch" in error_name.lower()
+            else:
+                self._is_network_error = False
             self._mode = 'error'
             self._dirty = True
         self._lcd.backlight = True
@@ -1574,11 +1585,17 @@ class LCDMenu:
         self._lcd.backlight = False
 
         def _poll():
+            consecutive_fetch_errors = 0
+            consecutive_heartbeat_errors = 0
             while not stop.is_set():
                 try:
                     self.woo.send_heartbeat()
-                except Exception:
-                    pass
+                    consecutive_heartbeat_errors = 0
+                except Exception as e:
+                    consecutive_heartbeat_errors += 1
+                    if consecutive_heartbeat_errors >= 3:
+                        log_warn("POLL", f"Heartbeat failed {consecutive_heartbeat_errors} times: {e}")
+                        self.pause_polling(f"Heartbeat failed ×{consecutive_heartbeat_errors}")
                 
                 # Check if polling is paused
                 with self._lock:
@@ -1591,6 +1608,7 @@ class LCDMenu:
 
                 try:
                     pending = self.woo.fetch_all('orders', {'status': 'processing'})
+                    consecutive_fetch_errors = 0
                     for order in sorted(pending, key=lambda o: o['id']):
                         if stop.is_set():
                             break
@@ -1601,12 +1619,16 @@ class LCDMenu:
                             self.orders.process_order(order)
                             with self._lock:
                                 self._run_count  += 1
+                                consecutive_fetch_errors = 0
                         except Exception as e:
                             log_error("POLL", f"Error processing order {order.get('id')}: {e}")
                             self.pause_polling(str(e)[:20] or f"Order {order.get('id')} Failed")
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    consecutive_fetch_errors += 1
+                    log_error("POLL", f"Fetch attempt {consecutive_fetch_errors} failed: {e}")
+                    if consecutive_fetch_errors >= 5:
+                        self.pause_polling(f"Fetch orders failed ×{consecutive_fetch_errors}")
                 stop.wait(self.config.poll_interval)
 
         threading.Thread(target=_poll, daemon=True).start()

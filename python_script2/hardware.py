@@ -268,6 +268,7 @@ class HardwareInterface:
 
         # Cup sensor state is reported by the ESP32 via serial ("[cup] PRESENT" / "[cup] ABSENT").
         # The Pi does NOT read GPIO2 directly — GPIO2 on the Pi is I2C SDA (used by the LCD).
+        self._cup_lock = threading.Lock()  # Protects _cup_present and event loop synchronization
         self._cup_present: bool = False
         self._cup_state_changed = threading.Event()
 
@@ -354,7 +355,8 @@ class HardwareInterface:
 
     def _on_cup_state_changed(self, present: bool):
         """Called from serial reader thread when ESP32 reports cup state change."""
-        self._cup_present = present
+        with self._cup_lock:
+            self._cup_present = present
         self._cup_state_changed.set()
         log_info("HWINT", f"Cup state: {'PRESENT' if present else 'ABSENT'}")
 
@@ -407,18 +409,36 @@ class HardwareInterface:
         if not self._esp:
             raise HardwareError("Serial port unavailable — cannot detect cup")
 
-        if not self._cup_present:
-            if self.ui:
-                self.ui.show_add_cup()
-            if self._neo:
-                self._neo.send("-c")
+        with self._cup_lock:
+            cup_present = self._cup_present
+            if not cup_present:
+                # Reset event before showing UI (prevents lost wakeup)
+                self._cup_state_changed.clear()
 
-            while True:
-                self._cup_state_changed.wait()
+        if cup_present:
+            # Cup already present, skip waiting
+            self._cup_confirm_countdown()
+            return
+
+        # Cup was absent when we checked, now wait for it
+        if self.ui:
+            self.ui.show_add_cup()
+        if self._neo:
+            self._neo.send("-c")
+
+        while True:
+            self._cup_state_changed.wait()  # Safe: event was cleared under lock
+
+            with self._cup_lock:
                 self._cup_state_changed.clear()
                 if self._cup_present:
                     log_info("HWINT", "Cup detected")
-                    break
+                    cup_present = True
+                else:
+                    cup_present = False
+
+            if cup_present:
+                break
 
         self._cup_confirm_countdown()
 
@@ -464,15 +484,25 @@ class HardwareInterface:
         if self._neo:
             self._neo.send("-done")
             self._neo.send(f"-bl {num}")
-        
+
+        with self._cup_lock:
+            # Reset event before entering wait loop
+            self._cup_state_changed.clear()
+
         while True:
             self._cup_state_changed.wait(timeout=0.5)
-            self._cup_state_changed.clear()
-            if not self._cup_present:
+
+            with self._cup_lock:
+                self._cup_state_changed.clear()
+                if not self._cup_present:
+                    cup_removed = True
+                else:
+                    cup_removed = False
+
+            if cup_removed:
                 log_info("HWINT", "Cup removed!")
                 self._neo.send("-i")
                 time.sleep(1)
-
                 return
 
     # ── Motion ───────────────────────────────────────────────────
@@ -544,7 +574,10 @@ class HardwareInterface:
         try:
             self._esp.wait_for(["Move done"], timeout=timeout)
         except TimeoutError:
-            print("[HW] WARNING: sync barrier timed out – assuming move complete")
+            raise HardwareError(
+                f"Carriage sync timed out after {timeout}s — stepper may be jammed. "
+                f"Last known position: {self.x_position}"
+            )
 
     def move_x(self, position: int):
         """Move the X axis to *position* steps and wait for completion."""
@@ -558,7 +591,10 @@ class HardwareInterface:
         try:
             self._esp.wait_for(["Move done"], timeout=30.0)
         except TimeoutError:
-            print("[HW] WARNING: move timed out")
+            raise HardwareError(
+                f"Carriage move to X={position} timed out after 30s — stepper may be jammed. "
+                f"Current position unknown, aborting to prevent collision."
+            )
 
     def move_to_idle(self):
         """Move to idle position with servo at safe close_angle.
