@@ -82,6 +82,10 @@ class RotaryEncoder:
 
     def start(self) -> None:
         """Configure GPIO pins and launch the polling thread."""
+        try:
+            GPIO.setmode(GPIO.BCM)
+        except RuntimeError:
+            pass
         GPIO.setup(self._pin_clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(self._pin_dt,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(self._pin_sw,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
