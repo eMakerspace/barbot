@@ -93,15 +93,32 @@ class OrderProcessor:
 
                 log_info("ORDER", f"Order #{order_id}: Making drink {drink_num}/{total}: {spec.name}")
                 spec.log()
-                if self.ui:
-                    self.ui.show_mixing(drink_num, total, spec.name)
-                self.hw.make_drink(spec)
-                self.progress.drink_done()
-        except Exception as e:
-            log_error("ORDER", f"Order #{order_id}: Error making drink: {e}")
-            if self.ui:
-                self.ui.clear_mixing()
-            raise
+
+                while True:  # Retry loop for this drink
+                    try:
+                        if self.ui:
+                            self.ui.show_mixing(drink_num, total, spec.name)
+                        self.hw.make_drink(spec)
+                        self.progress.drink_done()
+                        break  # Success — exit retry loop
+                    except Exception as e:
+                        log_error("ORDER", f"Order #{order_id}: Error making drink: {e}")
+                        if self.ui:
+                            self.ui.clear_mixing()
+                            self.ui.pause_polling(f"Drink {drink_num}: {str(e)[:20]}")
+                            # Wait for user to resolve _retry_drink flag
+                            with self.ui._lock:
+                                should_retry = self.ui._retry_drink
+                            if should_retry:
+                                log_info("ORDER", f"Order #{order_id}: User chose RETRY for drink {drink_num}")
+                                continue  # Retry this drink
+                            else:
+                                log_info("ORDER", f"Order #{order_id}: User chose CANCEL for drink {drink_num}")
+                                self.progress.drink_done()  # Mark as done to move progress forward
+                                break  # Skip to next drink
+                        else:
+                            # No UI — re-raise so polling thread can handle it
+                            raise
         finally:
             self._stop_heartbeat(hb_thread)
 

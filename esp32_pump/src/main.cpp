@@ -214,12 +214,15 @@ private:
 // move the cart immediately while residue drains from the tubing.
 // ---------------------------------------------------------------------------
 
-static void fillEnd(const char* reason, float dispensed, uint32_t elapsed) {
+static void fillEnd(const char* reason, float dispensed, uint32_t elapsed, int pumpIdx) {
+    pumpStop(pumpIdx);
+    delay(600);
+    pumpReverse(pumpIdx);
+    delay(2000);
+    pumpStop(pumpIdx);
     Serial.printf("[FILL_END] reason=%s dispensed=%.1fg duration=%lums\n",
                   reason, dispensed, (unsigned long)elapsed);
     Serial.flush();
-    Serial.printf("[FILL] drain wait %dms\n", DRAIN_WAIT_MS);
-    delay(DRAIN_WAIT_MS);
 }
 
 static bool pumpValid(int pumpIdx) { return pumpIdx >= 0 && pumpIdx < 4; }
@@ -237,6 +240,14 @@ static void pumpStart(int pumpIdx) {
     // Forward direction on L298N.
     digitalWrite(PUMP_PIN_A[pumpIdx], HIGH);
     digitalWrite(PUMP_PIN_B[pumpIdx], LOW);
+    pumpActive[pumpIdx] = true;
+}
+
+static void pumpReverse(int pumpIdx) {
+    if (!pumpValid(pumpIdx)) return;
+    // Reverse direction on L298N.
+    digitalWrite(PUMP_PIN_A[pumpIdx], LOW);
+    digitalWrite(PUMP_PIN_B[pumpIdx], HIGH);
     pumpActive[pumpIdx] = true;
 }
 
@@ -286,7 +297,7 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
         return;
     }
     if (targetGrams <= 0.0f) {
-        Serial.println("[FILL_END] reason=zero_target dispensed=0.0g duration=0ms");
+        fillEnd("zero_target", 0.0f, 0, pumpIdx);
         return;
     }
 
@@ -332,8 +343,7 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
         uint32_t elapsed = millis() - startMs;
 
         if ((float)elapsed >= FILL_TIMEOUT_MS) {
-            pumpStop(pumpIdx);
-            fillEnd("timeout", dispensed, elapsed);
+            fillEnd("timeout", dispensed, elapsed, pumpIdx);
             return;
         }
 
@@ -341,8 +351,7 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
         if (raw == INT32_MIN) {
             Serial.printf("[HX711] read error %d/%d\n", ++hx711Errors, MAX_HX711_ERRORS);
             if (hx711Errors >= MAX_HX711_ERRORS) {
-                pumpStop(pumpIdx);
-                fillEnd("hx711_error", dispensed, elapsed);
+                fillEnd("hx711_error", dispensed, elapsed, pumpIdx);
                 return;
             }
             continue;
@@ -387,8 +396,7 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
         // No-progress check
         if (fabsf(filtered - lastWeight) < MIN_PROGRESS_G) {
             if (++noProgressCnt >= NO_PROGRESS_LIMIT) {
-                pumpStop(pumpIdx);
-                fillEnd("empty_or_blocked", dispensed, elapsed);
+                fillEnd("empty_or_blocked", dispensed, elapsed, pumpIdx);
                 return;
             }
         } else {
@@ -405,15 +413,13 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
             float oldest = weightHistory[histIdx % RATE_WINDOW_SAMPLES];
             float change = fabsf(oldest - filtered);
             if (change < RATE_WINDOW_G) {
-                pumpStop(pumpIdx);
-                fillEnd("pump_failure", dispensed, elapsed);
+                fillEnd("pump_failure", dispensed, elapsed, pumpIdx);
                 return;
             }
         }
 
         if (dispensed >= stopAt) {
-            pumpStop(pumpIdx);
-            fillEnd("target_reached", dispensed, elapsed);
+            fillEnd("target_reached", dispensed, elapsed, pumpIdx);
             return;
         }
     }
