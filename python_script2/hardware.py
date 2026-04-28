@@ -475,6 +475,8 @@ class HardwareInterface:
             if wait > 0:
                 time.sleep(wait)
         log_info("HWINT", "Cup countdown done, starting dispense.")
+        if self._neo:
+            self._neo.send(f"-br {self._last_order_id % 100}")
 
     def wait_for_cup_removal(self):
         """Wait for cup to be removed after drink is done.
@@ -490,8 +492,9 @@ class HardwareInterface:
 
         # Phase 1: attention animations
         if self._neo:
-            self._neo.send("-done")
             self._neo.send(f"-bl {num}")
+            time.sleep(0.1)
+            self._neo.send("-done")
 
         with self._cup_lock:
             # Reset event before entering wait loop
@@ -689,9 +692,15 @@ class HardwareInterface:
         if zone:
             print(f"[HW] BLOCKED: servo open at slot {slot} (pos={pos}) forbidden — {zone}")
             return
-        # Park servo BEFORE moving carriage (critical for safety)
+
+        if self._neo:
+            self._neo.send("-mv")
 
         self.move_x(pos)  # blocks until sled is at slot
+
+        if self._neo:
+            self._neo.send("-pour")
+
         pour_ms = int(self.hw.pour_duration_ms * viscosity)
         settle_ms = self.hw.settle_duration_ms
         print(
@@ -728,8 +737,14 @@ class HardwareInterface:
         pos = self.hw.position_for_slot(slot)
         if pos is None:
             raise HardwareError(f"No position configured for slot {slot!r}")
+
+        if self._neo:
+            self._neo.send("-mv")
+
         self.move_x(pos)  # blocks until sled is at slot
 
+        if self._neo:
+            self._neo.send("-mix")
 
         comp = self.hw.pump_tubing_compensation_g
         target_g = ml + comp
@@ -822,33 +837,35 @@ class HardwareInterface:
     # ── High-level drink sequence ────────────────────────────────
 
     def make_drink(self, spec):
-        """Full sequence for one DrinkSpec: cup → spirits → mixers → idle → done.
+        """Full sequence for one DrinkSpec: cup → spirits → mixers → idle.
+
+        Does NOT wait for cup removal—that's handled by the caller to allow
+        error handling with animations before removal. Caller must ensure cup
+        removal is handled (even on error).
 
         Args:
             spec: DrinkSpec with spirits and mixers to dispense
         """
         num = self._last_order_id % 100
 
-        
-        self.wait_for_cup()
-        if self._neo:
-            self._neo.send(f"-br {num}")
+        try:
+            self.wait_for_cup()
+            if self._neo:
+                self._neo.send(f"-br {num}")
 
-        for s in spec.spirits:
-            if s["slot"] is None:
-                print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
-                continue
-            self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
+            for s in spec.spirits:
+                if s["slot"] is None:
+                    print(f"[HW] WARN: no slot for spirit '{s['ingredient']}' – skipping")
+                    continue
+                self.dispense_spirit(s["slot"], s["pours"], s.get("viscosity", 1.0))
 
-        for m in spec.mixers:
-            if m["slot"] is None:
-                print(f"[HW] WARN: no slot for mixer '{m['ingredient']}' – skipping")
-                continue
-            self.dispense_mixer(m["slot"], m["ml"])
-
-        self.move_to_idle()
-
-        self.wait_for_cup_removal()
+            for m in spec.mixers:
+                if m["slot"] is None:
+                    print(f"[HW] WARN: no slot for mixer '{m['ingredient']}' – skipping")
+                    continue
+                self.dispense_mixer(m["slot"], m["ml"])
+        finally:
+            self.move_to_idle()
 
     # ── Legacy compatibility stubs ───────────────────────────────
 

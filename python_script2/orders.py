@@ -100,11 +100,15 @@ class OrderProcessor:
                             self.ui.show_mixing(drink_num, total, spec.name)
                         self.hw.make_drink(spec)
                         self.progress.drink_done()
+                        self.hw.wait_for_cup_removal()  # Success: wait for cup removal
                         break  # Success — exit retry loop
                     except Exception as e:
                         log_error("ORDER", f"Order #{order_id}: Error making drink: {e}")
                         if self.ui:
                             self.ui.clear_mixing()
+                            # Show red flash error animation while waiting for user choice
+                            if self.hw._neo:
+                                self.hw._neo.send("-e RED_FLASH_FAST")
                             self.ui.pause_polling(f"Drink {drink_num}: {str(e)[:20]}")
                             # Wait for user to confirm their choice via LCD
                             with self.ui._pause_cv:
@@ -117,6 +121,7 @@ class OrderProcessor:
                             else:
                                 log_info("ORDER", f"Order #{order_id}: User chose CANCEL for drink {drink_num}")
                                 self.progress.drink_done()  # Mark as done to move progress forward
+                                self.hw.wait_for_cup_removal()  # Cancel: still wait for cup removal
                                 break  # Skip to next drink
                         else:
                             # No UI — re-raise so polling thread can handle it
