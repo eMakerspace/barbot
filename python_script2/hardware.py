@@ -480,8 +480,20 @@ class HardwareInterface:
         if self.ui:
             self.ui.restore_mixing()
 
-    def wait_for_cup_removal(self):
+    def force_require_cup_removal(self):
+        """Force the next wait_for_cup() to require a fresh cup placement.
+
+        Used after errors to ensure the user removes the current cup
+        (if present) and places a new one before continuing.
+        """
+        with self._cup_lock:
+            self._cup_present = False
+
+    def wait_for_cup_removal(self, is_failed: bool = False):
         """Wait for cup to be removed after drink is done.
+
+        Args:
+            is_failed: If True, show GREEN_SOLID instead of -done animation (for failed drinks).
         """
         log_info("HWINT", f"Drink done — waiting for cup removal...")
 
@@ -496,7 +508,10 @@ class HardwareInterface:
         if self._neo:
             self._neo.send(f"-bl {num}")
             time.sleep(0.1)
-            self._neo.send("-done")
+            if is_failed:
+                self._neo.send("-e GREEN_SOLID")
+            else:
+                self._neo.send("-done")
 
         with self._cup_lock:
             # Reset event before entering wait loop

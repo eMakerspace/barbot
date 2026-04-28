@@ -117,15 +117,17 @@ class OrderProcessor:
                                 while self.ui._polling_paused:
                                     self.ui._pause_cv.wait()
                                 should_retry = self.ui._retry_drink
+                            # Force cup removal before proceeding (user must remove cup and place a fresh one)
+                            if self.ui:
+                                self.ui.show_replace_failed_drink()
+                            self.hw.force_require_cup_removal()
+                            self.hw.wait_for_cup_removal(is_failed=True)
                             if should_retry:
                                 log_info("ORDER", f"Order #{order_id}: User chose RETRY for drink {drink_num}")
                                 continue  # Retry this drink
                             else:
                                 log_info("ORDER", f"Order #{order_id}: User chose CANCEL for drink {drink_num}")
                                 self.progress.drink_done()  # Mark as done to move progress forward
-                                if self.ui:
-                                    self.ui.show_drink_finished()
-                                self.hw.wait_for_cup_removal()  # Cancel: still wait for cup removal
                                 break  # Skip to next drink
                         else:
                             # No UI — re-raise so polling thread can handle it

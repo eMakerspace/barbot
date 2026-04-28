@@ -156,6 +156,7 @@ class LCDMenu:
 
         # cup removed / add cup state
         self._cup_removed_time = 0.0   # time when cup_removed mode was shown
+        self._replace_failed_drink = False  # true if showing "replace failed drink" (vs. "enjoy your drink")
 
         # marquee (ping-pong scroll for selected row)
         self._marq_label  = ''
@@ -795,11 +796,17 @@ class LCDMenu:
         self._write_row(3, '                    ')
 
     def _draw_cup_removed(self):
-        """Show 'Enjoy your drink!' while waiting for cup removal."""
-        self._write_row(0, self._hdr('BarBot'))
-        self._write_row(1, '  Enjoy your    ')
-        self._write_row(2, '    drink!      ')
-        self._write_row(3, '                ')
+        """Show 'Enjoy your drink!' or 'Replace failed drink' while waiting for cup removal."""
+        if self._replace_failed_drink:
+            self._write_row(0, self._hdr('BarBot'))
+            self._write_row(1, '  Replace      ')
+            self._write_row(2, '   failed      ')
+            self._write_row(3, '    drink!     ')
+        else:
+            self._write_row(0, self._hdr('BarBot'))
+            self._write_row(1, '  Enjoy your    ')
+            self._write_row(2, '    drink!      ')
+            self._write_row(3, '                ')
 
     def _draw_add_cup(self):
         """Show flashing 'PUT CUP IN' prompt."""
@@ -884,6 +891,15 @@ class LCDMenu:
         """Show 'Enjoy your drink!' screen while waiting for cup removal."""
         with self._lock:
             self._mode = 'cup_removed'
+            self._replace_failed_drink = False
+            self._dirty = True
+        self._lcd.backlight = True
+
+    def show_replace_failed_drink(self):
+        """Show 'Replace failed drink' screen after error (user must remove cup and place a new one)."""
+        with self._lock:
+            self._mode = 'cup_removed'
+            self._replace_failed_drink = True
             self._dirty = True
         self._lcd.backlight = True
 
