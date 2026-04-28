@@ -34,12 +34,11 @@ public:
     void setIdle();
     void setOff();
     void setStrobe();
-    void setBrightness(uint8_t brightness);
+    void setCup();
     void setMoving();
     void setPouring();
     void setMixing();
     void setDone();
-    void setCupWait();
     void setDrinkReady();
     void setOverdueStrobe();
     void setSolid(const CRGB &color);
@@ -47,7 +46,7 @@ public:
     void setPulse(const CRGB &color, uint16_t periodMs = 1200);
 
 private:
-    enum class Mode : uint8_t { Idle, Off, Strobe, Moving, Pouring, Mixing, Done, CupWait, DrinkReady, OverdueStrobe, Solid, Flash, Pulse };
+    enum class Mode : uint8_t { Idle, Off, Strobe, Cup, Moving, Pouring, Mixing, Done, DrinkReady, OverdueStrobe, Solid, Flash, Pulse };
 
     CRGB     leds_[cfg::LED_COUNT];
     Mode     mode_      = Mode::Idle;
@@ -89,11 +88,11 @@ private:
     // -----------------------------------------------------------------------
     // Activity animation updates
     // -----------------------------------------------------------------------
+    void updateCup();
     void updateMoving();
     void updatePouring();
     void updateMixing();
     void updateDone();
-    void updateCupWait();
     void updateDrinkReady();
     void updateOverdueStrobe();
 

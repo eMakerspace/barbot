@@ -40,10 +40,6 @@ static constexpr int NUM_U = sizeof(U_PHASES) / sizeof(U_PHASES[0]);
 // Public API
 // ============================================================================
 
-void LedStripController::setBrightness(uint8_t brightness) {
-    FastLED.setBrightness(brightness);
-}
-
 void LedStripController::begin() {
     FastLED.addLeds<WS2812, cfg::LED_PIN, GRB>(leds_, cfg::LED_COUNT);
     FastLED.setBrightness(200);
@@ -78,11 +74,11 @@ void LedStripController::tick() {
             show();
             break;
         }
+        case Mode::Cup: updateCup(); break;
         case Mode::Moving: updateMoving(); break;
         case Mode::Pouring: updatePouring(); break;
         case Mode::Mixing: updateMixing(); break;
         case Mode::Done: updateDone(); break;
-        case Mode::CupWait: updateCupWait(); break;
         case Mode::DrinkReady: updateDrinkReady(); break;
         case Mode::OverdueStrobe: updateOverdueStrobe(); break;
         case Mode::Solid:
@@ -119,6 +115,11 @@ void LedStripController::setStrobe() {
     mode_ = Mode::Strobe;
 }
 
+void LedStripController::setCup() {
+    mode_ = Mode::Cup;
+    animStart_ = millis();
+}
+
 void LedStripController::setIdle() {
     mode_ = Mode::Idle;
     uint32_t now = millis();
@@ -148,11 +149,6 @@ void LedStripController::setMixing() {
 
 void LedStripController::setDone() {
     mode_ = Mode::Done;
-    animStart_ = millis();
-}
-
-void LedStripController::setCupWait() {
-    mode_ = Mode::CupWait;
     animStart_ = millis();
 }
 
@@ -553,8 +549,55 @@ void LedStripController::animUMeteor(uint32_t t) {
 }
 
 // ============================================================================
-// Activity mode animations (Moving, Pouring, Mixing, Done)
+// Activity mode animations (Cup, Moving, Pouring, Mixing, Done)
 // ============================================================================
+
+// CUP animation: vibrant color flashing on RING synchronized with 7-segment cup fall (5s cycle)
+void LedStripController::updateCup() {
+    uint32_t t = millis() - animStart_;
+    constexpr uint32_t CYCLE = 5000;
+    uint32_t tmod = t % CYCLE;
+
+    FastLED.clear();
+
+    if (tmod < 100) {
+        // Pre-entry: dim warm glow
+        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CRGB(255, 100, 0));
+        for (uint16_t i = 0; i < cfg::RING_LEN; i++) {
+            leds_[cfg::RING_START + i].nscale8(100);
+        }
+    } else if (tmod < 800) {
+        // Cup falling: rapid vibrant color flashing (80ms cycle)
+        constexpr uint8_t HUES[4] = { 0, 32, 64, 192 };  // red, orange, yellow, magenta
+        uint8_t hueIdx = (uint8_t)((tmod - 100) / 80) % 4;
+        bool flashOn = ((tmod - 100) % 160) < 80;
+
+        if (flashOn) {
+            fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CHSV(HUES[hueIdx], 255, 255));
+        }
+    } else if (tmod < 1200) {
+        // Impact burst: fast rainbow cycle
+        uint8_t hue = (uint8_t)(255UL * (tmod - 800) / 400);
+        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CHSV(hue, 255, 255));
+    } else if (tmod < 3000) {
+        // Cup resting: slow breathing glow
+        uint8_t br = sinBright(tmod - 1200, 1800, 80, 200);
+        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CRGB(255, 150, 0));
+        for (uint16_t i = 0; i < cfg::RING_LEN; i++) {
+            leds_[cfg::RING_START + i].nscale8(br);
+        }
+    } else if (tmod < 4500) {
+        // Fade out: linear decay
+        uint8_t br = (uint8_t)(255UL * (4500 - tmod) / 1500);
+        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CRGB(255, 150, 0));
+        for (uint16_t i = 0; i < cfg::RING_LEN; i++) {
+            leds_[cfg::RING_START + i].nscale8(br);
+        }
+    }
+
+    FastLED.setBrightness(255);
+    show();
+}
 
 // MOVING animation: amber comet racing along BAR, amber pulse on RING, dim glow on U
 void LedStripController::updateMoving() {
@@ -702,60 +745,68 @@ void LedStripController::updateMixing() {
     show();
 }
 
-// DONE animation: celebratory green/gold sparkle
+// DONE animation: celebratory rainbow confetti burst with synchronized pulses
 void LedStripController::updateDone() {
     uint32_t t = millis() - animStart_;
     FastLED.clear();
 
-    // First 1s: fast green chase
-    // Then: green + gold sparkle loop
-    constexpr uint32_t CHASE_TIME = 1000;
+    constexpr uint32_t PHASE1 = 1200;  // Initial rainbow chase burst
+    constexpr uint32_t PHASE2 = 800;   // Synchronized ring + segments pulse cycle
 
-    if (t < CHASE_TIME) {
-        // Fast green chase
-        constexpr uint32_t STEP = 30;
-        uint16_t step = (uint16_t)(t / STEP);
-        uint16_t pos = (uint16_t)(step % cfg::BAR_LEN);
-        
-        leds_[cfg::BAR_START + pos] = CRGB::Green;
-        if (pos > 0) leds_[cfg::BAR_START + pos - 1] = CRGB(0, 200, 0);
-        if (pos > 1) leds_[cfg::BAR_START + pos - 2] = CRGB(0, 100, 0);
-        
-        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CRGB::Green);
-        fill_solid(leds_ + cfg::U_START, cfg::U_LEN, CRGB::Green);
-    } else {
-        // Sparkle phase (looping)
-        uint32_t sparkle_t = (t - CHASE_TIME) % 2000;
-        
-        // Random-ish sparkle pattern (deterministic based on t)
-        for (uint16_t i = 0; i < cfg::LED_COUNT; i++) {
-            uint16_t seed = i + (uint16_t)(sparkle_t / 100);
-            seed ^= (seed >> 8);
-            if ((seed & 0x03) == 0) {
-                // Green or gold
-                if ((seed & 0x04) == 0) {
-                    leds_[i] = CRGB(0, 255, 0);  // bright green
+    if (t < PHASE1) {
+        // Phase 1: Fast rainbow comet cascading through all segments (BAR → RING → U)
+        uint16_t totalLen = cfg::BAR_LEN + cfg::RING_LEN + cfg::U_LEN;
+        uint16_t pos = (uint16_t)((t * totalLen / 600) % (totalLen * 2));
+        if (pos >= totalLen) pos = 2 * totalLen - pos;
+
+        constexpr uint16_t TAIL = 8;
+        uint8_t hue = (uint8_t)(255UL * t / PHASE1);
+
+        for (uint16_t i = 0; i < totalLen; i++) {
+            uint16_t dist = (i <= pos) ? (pos - i) : (totalLen - i + pos);
+            if (dist == 0) {
+                uint16_t idx = i;
+                if (idx < cfg::BAR_LEN) {
+                    leds_[cfg::BAR_START + idx] = CHSV(hue, 255, 255);
+                } else if (idx < cfg::BAR_LEN + cfg::RING_LEN) {
+                    leds_[cfg::RING_START + idx - cfg::BAR_LEN] = CHSV(hue, 255, 255);
                 } else {
-                    leds_[i] = CRGB(255, 200, 0);  // gold
+                    leds_[cfg::U_START + idx - cfg::BAR_LEN - cfg::RING_LEN] = CHSV(hue, 255, 255);
+                }
+            } else if (dist < TAIL) {
+                uint8_t v = gamma8((uint8_t)(255 - 255 * dist / TAIL));
+                uint16_t idx = i;
+                if (idx < cfg::BAR_LEN) {
+                    leds_[cfg::BAR_START + idx] = CHSV(hue, 200, v);
+                } else if (idx < cfg::BAR_LEN + cfg::RING_LEN) {
+                    leds_[cfg::RING_START + idx - cfg::BAR_LEN] = CHSV(hue, 200, v);
+                } else {
+                    leds_[cfg::U_START + idx - cfg::BAR_LEN - cfg::RING_LEN] = CHSV(hue, 200, v);
                 }
             }
         }
-    }
+    } else {
+        // Phase 2: Looping pulse celebration — all segments synchronized vibrant colors
+        uint32_t pulse_t = (t - PHASE1) % PHASE2;
+        bool pulse_on = pulse_t < (PHASE2 / 2);
 
-    FastLED.setBrightness(255);
-    show();
-}
+        if (pulse_on) {
+            // Pulse on: vibrant rainbow fill across all segments
+            uint8_t hue = (uint8_t)(255UL * (pulse_t % 600) / 600);
 
-// CUP-WAIT alert: ring flashes green quickly ("cart"), bar + U flash red quickly (background).
-void LedStripController::updateCupWait() {
-    uint32_t t = millis() - animStart_;
-    bool on = ((t / 90) % 2) == 0;  // fast flash
-    FastLED.clear();
-
-    if (on) {
-        fill_solid(leds_ + cfg::BAR_START, cfg::BAR_LEN, CRGB::Red);
-        fill_solid(leds_ + cfg::U_START, cfg::U_LEN, CRGB::Red);
-        fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CRGB::Green);
+            fill_solid(leds_ + cfg::BAR_START, cfg::BAR_LEN, CHSV(hue, 255, 220));
+            fill_solid(leds_ + cfg::RING_START, cfg::RING_LEN, CHSV(hue + 85, 255, 220));
+            fill_solid(leds_ + cfg::U_START, cfg::U_LEN, CHSV(hue + 170, 255, 220));
+        } else {
+            // Pulse off: dim starfield effect
+            for (uint16_t i = 0; i < cfg::LED_COUNT; i++) {
+                uint16_t seed = i ^ (uint16_t)(pulse_t / 100);
+                if ((seed & 0x07) == 0) {
+                    uint8_t hue = (uint8_t)(seed >> 8);
+                    leds_[i] = CHSV(hue, 200, 150);
+                }
+            }
+        }
     }
 
     FastLED.setBrightness(255);

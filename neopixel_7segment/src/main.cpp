@@ -52,18 +52,15 @@ void setup() {
     Serial.println("7-segment display ready.");
     Serial.println("Commands:");
     Serial.println("  <number>      - display 0-99 (static)");
-    Serial.println("  -bl <num>     - blink number");
-    Serial.println("  -br <num>     - breathing effect");
+    Serial.println("  -bl <num>     - blink number on 7-segment");
+    Serial.println("  -br <num>     - breathing effect on 7-segment");
     Serial.println("  -i            - idle animations (~6 min 45 s cycle)");
-    Serial.println("  -c            - falling cup animation");
-    Serial.println("  -bri <0-255>  - set LED strip brightness");
+    Serial.println("  -c            - falling cup animation (7-segment + vibrant ring flash)");
     Serial.println("  -s            - fast red strobe (all LEDs)");
-    Serial.println("  -cnt          - count 00->99->00 at 0.4s takt");
-    Serial.println("  -mv           - moving to slot animation");
-    Serial.println("  -pour         - pouring spirit animation");
-    Serial.println("  -mix          - mixing/dispensing animation");
-    Serial.println("  -done         - drink done celebration");
-    Serial.println("  -cupwait      - waiting-for-cup alert (green ring, red background)");
+    Serial.println("  -mv           - moving to slot animation (NeoPixel only)");
+    Serial.println("  -pour         - pouring spirit animation (NeoPixel only)");
+    Serial.println("  -mix          - mixing/dispensing animation (NeoPixel only)");
+    Serial.println("  -done         - drink done celebration (NeoPixel only)");
     Serial.println("  -e <effect>   - set fault/status effect (RED_SOLID, RED_FLASH_FAST, RED_PULSE, YELLOW_SOLID, ORANGE_FLASH, GREEN_SOLID, GREEN_FLASH_SLOW, GREEN_FLASH_FAST, IDLE)");
 }
 
@@ -98,19 +95,11 @@ void loop() {
             case CommandType::Cup:
                 Serial.println("Cup animation...");
                 controller.setCup();
-                break;
-            case CommandType::Count:
-                Serial.println("Counting 00->99->00...");
-                controller.setCounting(400);
+                ledStrip.setCup();
                 break;
             case CommandType::Strobe:
                 Serial.println("Strobing red!");
                 ledStrip.setStrobe();
-                break;
-            case CommandType::Brightness:
-                Serial.print("Brightness: ");
-                Serial.println(cmd.value);
-                ledStrip.setBrightness(cmd.value);
                 break;
             case CommandType::Moving:
                 Serial.println("Moving...");
@@ -127,11 +116,6 @@ void loop() {
             case CommandType::Done:
                 Serial.println("Done!");
                 ledStrip.setDone();
-                break;
-            case CommandType::CupWait:
-                Serial.println("Cup wait alert...");
-                controller.setCup();
-                ledStrip.setCupWait();
                 break;
             case CommandType::DrinkReady:
                 Serial.println("Drink ready!");
@@ -189,7 +173,7 @@ void loop() {
                 break;
             }
             case CommandType::Invalid:
-                Serial.println("ERR: unknown command. Try: <num>, -bl <num>, -br <num>, -i, -c, -mv, -pour, -mix, -done, -cupwait, -e <effect>");
+                Serial.println("ERR: unknown command. Try: <num>, -bl <num>, -br <num>, -i, -c, -s, -mv, -pour, -mix, -done, -cupwait, -e <effect>");
                 break;
         }
     }

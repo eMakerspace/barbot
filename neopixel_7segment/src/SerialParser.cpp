@@ -52,22 +52,9 @@ Command SerialParser::parseCommand(const char *line) {
         return cmd;
     }
 
-    if (strcmp(line, "-cnt") == 0) {
-        cmd.type = CommandType::Count;
-        cmd.value = 0;
-        return cmd;
-    }
-
     if (strcmp(line, "-s") == 0) {
         cmd.type = CommandType::Strobe;
         cmd.value = 0;
-        return cmd;
-    }
-
-    if (strncmp(line, "-bri", 4) == 0) {
-        cmd.type = CommandType::Brightness;
-        int val = atoi(line + 4);
-        cmd.value = (val >= 0 && val <= 255) ? (uint8_t)val : 200;
         return cmd;
     }
 
@@ -91,12 +78,6 @@ Command SerialParser::parseCommand(const char *line) {
 
     if (strcmp(line, "-done") == 0) {
         cmd.type = CommandType::Done;
-        cmd.value = 0;
-        return cmd;
-    }
-
-    if (strcmp(line, "-cupwait") == 0) {
-        cmd.type = CommandType::CupWait;
         cmd.value = 0;
         return cmd;
     }

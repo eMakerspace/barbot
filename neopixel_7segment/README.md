@@ -31,20 +31,31 @@ Connect at **115200 baud**. Send commands as plain text lines terminated with `\
 
 | Command | Description |
 |---|---|
-| `<number>` | Display a static number (0–99) |
-| `-bl <number>` | Blink a number (0–99) |
-| `-br <number>` | Breathing brightness effect on a number (0–99) |
-| `-i` | Idle LED animations — **default mode on startup** |
-| `-c` | Falling cup animation on the display |
+| `<number>` | Display a static number (0–99) on 7-segment |
+| `-bl <number>` | Blink a number (0–99) on 7-segment |
+| `-br <number>` | Breathing brightness effect on a number (0–99) on 7-segment |
+| `-i` | Idle LED animations on all segments — **default mode on startup** |
+| `-c` | Falling cup animation: 7-segment cup + vibrant flashing ring |
+| `-mv` | Moving to slot: animates NeoPixel ring & segments, preserves 7-segment display |
+| `-pour` | Pouring animation: animates NeoPixel ring & segments, preserves 7-segment display |
+| `-mix` | Mixing animation: animates NeoPixel ring & segments, preserves 7-segment display |
+| `-done` | Celebratory animation on NeoPixel (rainbow confetti burst + pulse cycle) |
+| `-s` | Fast red strobe on all LEDs |
+| `-drinkready` | Drink ready: green ring pulse + attention patterns on bar/U |
+| `-drinknum <num>` | Drink ready with order number blinking on 7-segment |
+| `-overduestrobe` | Overdue alert: full red strobe everything |
+| `-e <effect>` | Error/status effect: `IDLE`, `RED_SOLID`, `RED_FLASH_FAST`, `RED_PULSE`, `YELLOW_SOLID`, `ORANGE_FLASH`, `GREEN_SOLID`, `GREEN_FLASH_SLOW`, `GREEN_FLASH_FAST` |
 
 ### Example session
 
 ```
-42          → display shows 42 (static)
--bl 7       → display blinks 7
--br 55      → display breathes 55
+42          → display shows 42 (static on 7-segment)
+-bl 7       → display blinks 7 (7-segment only)
+-br 55      → display breathes 55 (7-segment only)
 -i          → all three LED segments start idle animations
--c          → falling cup animation on 7-segment display
+-c          → falling cup on 7-segment + vibrant flash on ring
+-mv         → animate ring/segments, keep previous 7-segment display
+-done       → celebrate with rainbow confetti burst on NeoPixel
 ```
 
 ## Idle animations (`-i`)
