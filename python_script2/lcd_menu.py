@@ -147,6 +147,7 @@ class LCDMenu:
         self._run_backlight_until  = 0.0   # epoch time; backlight on while now < this
         self._polling_paused       = False # pause polling when error occurs
         self._retry_drink          = False # retry failed drink when user presses button
+        self._pause_cv             = threading.Condition(self._lock) # signals when pause state changes
 
         # mixing state (shown during active drink dispensing)
         self._mix_drink_num  = 0
@@ -539,7 +540,7 @@ class LCDMenu:
                         log_info("LCDUI", "User confirmed RETRY — retrying full drink")
                     else:
                         log_info("LCDUI", "User confirmed CANCEL — skipping drink")
-                        self.orders.skip_current_drink()
+                    self._pause_cv.notify_all()
                 else:
                     self._mode = 'menu'
                     self._dirty = True
@@ -916,7 +917,7 @@ class LCDMenu:
                 self._error_severity = 2  # Error severity
                 self._error_time = time.time()
                 # Track if this is a network error (for different UI display)
-                self._is_network_error = "failed" in error_name.lower() or "fetch" in error_name.lower()
+                self._is_network_error = "fetch" in error_name.lower() or "heartbeat" in error_name.lower()
             else:
                 self._is_network_error = False
             self._mode = 'error'

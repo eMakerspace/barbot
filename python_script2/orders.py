@@ -106,8 +106,10 @@ class OrderProcessor:
                         if self.ui:
                             self.ui.clear_mixing()
                             self.ui.pause_polling(f"Drink {drink_num}: {str(e)[:20]}")
-                            # Wait for user to resolve _retry_drink flag
-                            with self.ui._lock:
+                            # Wait for user to confirm their choice via LCD
+                            with self.ui._pause_cv:
+                                while self.ui._polling_paused:
+                                    self.ui._pause_cv.wait()
                                 should_retry = self.ui._retry_drink
                             if should_retry:
                                 log_info("ORDER", f"Order #{order_id}: User chose RETRY for drink {drink_num}")
