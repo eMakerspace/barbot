@@ -24,6 +24,12 @@ static uint32_t pumpOffAtMs[4] = {0, 0, 0, 0};
 #define DRAIN_WAIT_MS  2000     // ms to wait after fill before signalling done
 
 // ---------------------------------------------------------------------------
+// Forward declarations
+// ---------------------------------------------------------------------------
+static void pumpStop(int pumpIdx);
+static void pumpReverse(int pumpIdx);
+
+// ---------------------------------------------------------------------------
 // HX711 — bit-bang driver
 // ---------------------------------------------------------------------------
 class HX711 {
