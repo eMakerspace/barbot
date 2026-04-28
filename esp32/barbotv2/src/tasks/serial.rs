@@ -215,6 +215,15 @@ async fn handle_cmd(
             10 => {
                 *should_echo = !*should_echo;
             }
+            // `M50` Query cup presence state.
+            50 => {
+                let cup_present = crate::CUP_PRESENT.load(portable_atomic::Ordering::Relaxed);
+                if cup_present == 1 {
+                    log::info!("[cup] PRESENT\r");
+                } else {
+                    log::info!("[cup] ABSENT\r");
+                }
+            }
             // `M`
             _ => invalid_cmd(),
         },

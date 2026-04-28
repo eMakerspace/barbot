@@ -10,6 +10,7 @@ HAT ESP32 (barbotv2) — stepper, servo, cup sensor:
   M0               – Graceful stop (stepper decelerates).
   M0.1             – Immediate emergency stop (stepper/servo off).
   M1               – Resume after stop.
+  M50              – Query cup presence state. Responds "[cup] PRESENT" or "[cup] ABSENT".
 
 Pump ESP32 (esp32_pump) — pumps, scale, fill:
   G2 I{n} D{ms}    – Run pump n (0–3) for ms milliseconds, non-blocking.
@@ -408,6 +409,13 @@ class HardwareInterface:
         if not self._esp:
             raise HardwareError("Serial port unavailable — cannot detect cup")
 
+        # Query current cup state from ESP32 (M50 command)
+        self._esp.send("M50")
+        try:
+            self._esp.wait_for("[cup]", timeout=5)
+        except TimeoutError:
+            log_warn("HWINT", "Cup state query timed out, proceeding with cached state")
+
         with self._cup_lock:
             cup_present = self._cup_present
             if not cup_present:
@@ -416,6 +424,7 @@ class HardwareInterface:
 
         if cup_present:
             # Cup already present, skip waiting
+            log_info("HWINT", "Cup detected")
             self._cup_confirm_countdown()
             return
 
@@ -681,9 +690,6 @@ class HardwareInterface:
             print(f"[HW] BLOCKED: servo open at slot {slot} (pos={pos}) forbidden — {zone}")
             return
         # Park servo BEFORE moving carriage (critical for safety)
-        if self._esp:
-            self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
 
         self.move_x(pos)  # blocks until sled is at slot
         pour_ms = int(self.hw.pour_duration_ms * viscosity)
@@ -718,10 +724,6 @@ class HardwareInterface:
             raise HardwareError("Pump serial port unavailable — cannot dispense mixers")
 
         print(f"[HW] Mixer slot {slot} (pump {pump_idx}): {ml:.1f} ml")
-        # Park servo BEFORE moving carriage
-        if self._esp:
-            self._esp.send(f"G1 Z{self.hw.servo_close_angle}")
-            self._esp.send(f"T0 D{self.hw.settle_duration_ms}")
 
         pos = self.hw.position_for_slot(slot)
         if pos is None:

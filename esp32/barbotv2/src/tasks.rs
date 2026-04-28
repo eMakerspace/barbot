@@ -16,8 +16,10 @@ pub async fn cup_presence_monitor(
     // Emit initial state so the Pi can sync _cup_present on boot
     if last_state == Level::Low {
         log::info!("[cup] PRESENT\r");
+        crate::CUP_PRESENT.store(1, portable_atomic::Ordering::Relaxed);
     } else {
         log::info!("[cup] ABSENT\r");
+        crate::CUP_PRESENT.store(0, portable_atomic::Ordering::Relaxed);
     }
     log::info!("Cup presence sensor initialized\r");
 
@@ -33,8 +35,10 @@ pub async fn cup_presence_monitor(
         if current_state != last_state {
             if current_state == Level::Low {
                 log::info!("[cup] PRESENT\r");
+                crate::CUP_PRESENT.store(1, portable_atomic::Ordering::Relaxed);
             } else {
                 log::info!("[cup] ABSENT\r");
+                crate::CUP_PRESENT.store(0, portable_atomic::Ordering::Relaxed);
             }
             last_state = current_state;
         }

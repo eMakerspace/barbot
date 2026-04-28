@@ -52,6 +52,8 @@ static SLOT4_POS: AtomicI32 = AtomicI32::new(i32::MIN);
 static SLOT5_POS: AtomicI32 = AtomicI32::new(i32::MIN);
 // Track current servo angle (0-180°). Starts at 180° (safe/closed).
 static CURRENT_SERVO_ANGLE: AtomicI32 = AtomicI32::new(180);
+// Track cup presence state: 1 = present, 0 = absent
+static CUP_PRESENT: AtomicI32 = AtomicI32::new(0);
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
