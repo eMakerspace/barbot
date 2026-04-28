@@ -477,6 +477,8 @@ class HardwareInterface:
         log_info("HWINT", "Cup countdown done, starting dispense.")
         if self._neo:
             self._neo.send(f"-br {self._last_order_id % 100}")
+        if self.ui:
+            self.ui.restore_mixing()
 
     def wait_for_cup_removal(self):
         """Wait for cup to be removed after drink is done.
@@ -512,7 +514,10 @@ class HardwareInterface:
 
             if cup_removed:
                 log_info("HWINT", "Cup removed!")
-                self._neo.send("-i")
+                if self.ui:
+                    self.ui.clear_mixing()
+                if self._neo:
+                    self._neo.send("-i")
                 time.sleep(1)
                 return
 
@@ -749,7 +754,7 @@ class HardwareInterface:
         comp = self.hw.pump_tubing_compensation_g
         target_g = ml + comp
         self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
-        line = self._pump_esp.wait_for("[FILL_END]", timeout=120)
+        line = self._pump_esp.wait_for("[FILL_END]", timeout=35)
         reason = self._parse_fill_end_reason(line)
         if reason not in {"target_reached", "zero_target"}:
             raise HardwareError(f"Fill failed ({reason}): {line}")

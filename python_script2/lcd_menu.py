@@ -795,13 +795,7 @@ class LCDMenu:
         self._write_row(3, '                    ')
 
     def _draw_cup_removed(self):
-        """Show brief 'cup removed' confirmation (auto-clears after ~2s)."""
-        with self._lock:
-            elapsed = time.time() - self._cup_removed_time
-            if elapsed > 2.0:
-                self._mode = 'add_cup'
-                self._dirty = True
-                return
+        """Show 'Enjoy your drink!' while waiting for cup removal."""
         self._write_row(0, self._hdr('BarBot'))
         self._write_row(1, '  Enjoy your    ')
         self._write_row(2, '    drink!      ')
@@ -885,6 +879,20 @@ class LCDMenu:
             self._mode = 'add_cup'
             self._dirty = True
         self._lcd.backlight = True
+
+    def show_drink_finished(self):
+        """Show 'Enjoy your drink!' screen while waiting for cup removal."""
+        with self._lock:
+            self._mode = 'cup_removed'
+            self._dirty = True
+        self._lcd.backlight = True
+
+    def restore_mixing(self):
+        """Switch back to mixing mode if currently on add_cup (called after cup confirmed)."""
+        with self._lock:
+            if self._mode == 'add_cup':
+                self._mode = 'mixing'
+                self._dirty = True
 
     def show_error(self, error_name: str, severity: int):
         """Show error message from ESP32 on LCD.

@@ -100,6 +100,8 @@ class OrderProcessor:
                             self.ui.show_mixing(drink_num, total, spec.name)
                         self.hw.make_drink(spec)
                         self.progress.drink_done()
+                        if self.ui:
+                            self.ui.show_drink_finished()
                         self.hw.wait_for_cup_removal()  # Success: wait for cup removal
                         break  # Success — exit retry loop
                     except Exception as e:
@@ -121,6 +123,8 @@ class OrderProcessor:
                             else:
                                 log_info("ORDER", f"Order #{order_id}: User chose CANCEL for drink {drink_num}")
                                 self.progress.drink_done()  # Mark as done to move progress forward
+                                if self.ui:
+                                    self.ui.show_drink_finished()
                                 self.hw.wait_for_cup_removal()  # Cancel: still wait for cup removal
                                 break  # Skip to next drink
                         else:
