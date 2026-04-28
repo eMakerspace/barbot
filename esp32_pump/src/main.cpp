@@ -216,6 +216,8 @@ private:
 
 static void fillEnd(const char* reason, float dispensed, uint32_t elapsed, int pumpIdx) {
     pumpStop(pumpIdx);
+    Serial.printf("[RETRACT_START]\n");
+    Serial.flush();
     delay(600);
     pumpReverse(pumpIdx);
     delay(2000);
