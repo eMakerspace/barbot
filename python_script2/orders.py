@@ -117,11 +117,12 @@ class OrderProcessor:
                                 while self.ui._polling_paused:
                                     self.ui._pause_cv.wait()
                                 should_retry = self.ui._retry_drink
-                            # Force cup removal before proceeding (user must remove cup and place a fresh one)
+                            # Show "replace failed drink" and wait for removal
                             if self.ui:
                                 self.ui.show_replace_failed_drink()
-                            self.hw.force_require_cup_removal()
                             self.hw.wait_for_cup_removal(is_failed=True)
+                            # After cup is removed, force the next wait_for_cup() to require a fresh placement
+                            self.hw.force_require_cup_removal()
                             if should_retry:
                                 log_info("ORDER", f"Order #{order_id}: User chose RETRY for drink {drink_num}")
                                 continue  # Retry this drink
