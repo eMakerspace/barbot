@@ -211,13 +211,8 @@ private:
 // ---------------------------------------------------------------------------
 // Fill loop — G4 I{pump} W{grams}
 //
-// The pump is driven by relays on the C3. This ESP32 only monitors the scale
-// and sends [FILL_END] when the target weight is reached. The host (Pi) is
-// responsible for running the pump relay (G2 on C3) concurrently and stopping
-// it when it receives [FILL_END].
-//
-// [FILL_END] is sent before the drain wait so the host can stop the pump and
-// move the cart immediately while residue drains from the tubing.
+
+
 // ---------------------------------------------------------------------------
 
 static void fillEnd(const char* reason, float dispensed, uint32_t elapsed, int pumpIdx) {
@@ -226,7 +221,7 @@ static void fillEnd(const char* reason, float dispensed, uint32_t elapsed, int p
     Serial.flush();
     delay(600);
     pumpReverse(pumpIdx);
-    delay(2000);
+    delay(1000);
     pumpStop(pumpIdx);
     Serial.printf("[FILL_END] reason=%s dispensed=%.1fg duration=%lums\n",
                   reason, dispensed, (unsigned long)elapsed);
