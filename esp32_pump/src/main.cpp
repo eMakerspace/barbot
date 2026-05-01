@@ -309,9 +309,9 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
     const int   MAX_HX711_ERRORS    = 5;
     const float MIN_PROGRESS_G      = 1.0f;
     const int   NO_PROGRESS_LIMIT   = 50;
-    const float RATE_WINDOW_G       = 25.0f;
-    const int   RATE_WINDOW_SAMPLES = 90;
-    const float FILL_TIMEOUT_MS     = 30000.0f;
+    const float RATE_WINDOW_G       = 10.0f;
+    const int   RATE_WINDOW_SAMPLES = 120;
+    const float FILL_TIMEOUT_MS     = 45000.0f;
 
     // Establish baseline before pump starts
     int64_t bSum = 0; int bCount = 0;
