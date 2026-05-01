@@ -769,7 +769,7 @@ class HardwareInterface:
         comp = self.hw.pump_tubing_compensation_g
         target_g = ml + comp
         self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
-        line = self._pump_esp.wait_for("[FILL_END]", timeout=35)
+        line = self._pump_esp.wait_for("[FILL_END]", timeout=60)
         reason = self._parse_fill_end_reason(line)
         if reason not in {"target_reached", "zero_target"}:
             raise HardwareError(f"Fill failed ({reason}): {line}")
