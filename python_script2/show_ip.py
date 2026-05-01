@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Display the 152.x.x.x IP address on the LCD, then exit."""
 
-import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,17 +10,26 @@ from lcd import LcdDisplay
 
 
 def get_152_ip() -> str:
-    """Retrieve the 152.x.x.x IP address, or return an error message."""
+    """Retrieve the 152.x.x.x IP address using hostname -I, or return an error message."""
     try:
-        # Get all addresses for this hostname
-        hostname = socket.gethostname()
-        print(f"[DEBUG] Hostname: {hostname}")
-        addresses = socket.getaddrinfo(hostname, None)
-        print(f"[DEBUG] Found {len(addresses)} address(es)")
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        print(f"[DEBUG] hostname -I output: {result.stdout.strip()}")
 
-        # Filter for IPv4 addresses starting with 152.
-        for addr_info in addresses:
-            ip = addr_info[4][0]
+        if result.returncode != 0:
+            print(f"[DEBUG] hostname -I failed with code {result.returncode}")
+            return "Error: hostname cmd"
+
+        # Parse all IPs from the output
+        ips = result.stdout.strip().split()
+        print(f"[DEBUG] Found {len(ips)} IP(s): {ips}")
+
+        # Filter for IPs starting with 152.
+        for ip in ips:
             print(f"[DEBUG] Checking IP: {ip}")
             if ip.startswith("152."):
                 print(f"[DEBUG] Found 152.x IP: {ip}")
@@ -28,6 +37,9 @@ def get_152_ip() -> str:
 
         print("[DEBUG] No 152.x IP found")
         return "No 152.x IP"
+    except subprocess.TimeoutExpired:
+        print("[DEBUG] hostname command timed out")
+        return "Error: timeout"
     except Exception as e:
         error_msg = f"Error: {str(e)[:15]}"
         print(f"[DEBUG] Exception: {e}")
