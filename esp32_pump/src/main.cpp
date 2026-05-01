@@ -341,6 +341,7 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
     float weightHistory[RATE_WINDOW_SAMPLES] = {};
     int   histIdx = 0, histCount = 0;
     float dispensed = 0.0f;
+    uint32_t lastWeightLogMs = 0;
 
     while (true) {
         uint32_t elapsed = millis() - startMs;
@@ -395,6 +396,13 @@ static void fillLoop(Scale& scale, int pumpIdx, float targetGrams) {
         float filtered = kalman.update(weightG);
         dispensed = baseline - filtered;
         if (dispensed < 0.0f) dispensed = 0.0f;
+
+        // Periodic weight log (~1 Hz) so Python watchdog can reset its timer
+        if (elapsed - lastWeightLogMs >= 1000) {
+            Serial.printf("[FILL_WEIGHT] t=%lums w=%.1fg\n",
+                          (unsigned long)elapsed, dispensed);
+            lastWeightLogMs = elapsed;
+        }
 
         // No-progress check
         if (fabsf(filtered - lastWeight) < MIN_PROGRESS_G) {

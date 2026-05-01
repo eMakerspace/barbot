@@ -769,12 +769,31 @@ class HardwareInterface:
         comp = self.hw.pump_tubing_compensation_g
         target_g = ml + comp
         self._pump_esp.send(f"G4 I{pump_idx} W{target_g:.1f}")
-        line = self._pump_esp.wait_for("[FILL_END]", timeout=60)
-        reason = self._parse_fill_end_reason(line)
+
+        # Watchdog loop: reset a 5-second timer on every [FILL_WEIGHT] line.
+        # [FILL_END] exits the loop. 5 seconds of silence raises HardwareError.
+        # The ESP32 owns the overall timeout (FILL_TIMEOUT_MS = 60 s).
+        fill_end_line = None
+        while fill_end_line is None:
+            try:
+                line = self._pump_esp._lines.get(timeout=5)
+            except queue.Empty:
+                raise HardwareError(
+                    "Pump watchdog timeout: no weight log received for 5 s "
+                    "(pump may be stuck or disconnected)"
+                )
+            if "[FILL_END]" in line:
+                fill_end_line = line
+            elif "[FILL_WEIGHT]" in line:
+                log_info("HWINT", f"Fill progress: {line}")
+            # any other line (e.g. [OUTLIER], [HX711], [TREND]) is silently
+            # passed through — the reader thread already printed it
+
+        reason = self._parse_fill_end_reason(fill_end_line)
         if reason not in {"target_reached", "zero_target"}:
-            raise HardwareError(f"Fill failed ({reason}): {line}")
+            raise HardwareError(f"Fill failed ({reason}): {fill_end_line}")
         try:
-            for part in line.split():
+            for part in fill_end_line.split():
                 if part.startswith("dispensed="):
                     print(f"[HW]   dispensed: {part.split('=')[1]}")
         except Exception:
