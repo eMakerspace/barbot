@@ -59,6 +59,4 @@ if __name__ == "__main__":
         lcd.write_row(0, ip_addr)
         print("[DEBUG] IP written to display")
     finally:
-        print("[DEBUG] Turning off backlight")
-        lcd.backlight = False
         print("[DEBUG] Done")
