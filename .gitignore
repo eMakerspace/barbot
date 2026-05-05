@@ -20,6 +20,7 @@ storage.db
 *.kicad_prl
 *.sch-bak
 *~
+*.history
 _autosave-*
 *.tmp
 *-save.pro
