@@ -659,7 +659,7 @@
         "uuid": "a51aca20-2c17-4ddd-bb86-4a4608137bc9"
       }
     ],
-    "used_designators": "J11-14",
+    "used_designators": "J11-16,#PWR16-17",
     "variants": []
   },
   "sheets": [
